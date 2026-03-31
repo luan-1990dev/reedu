@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1003473714651",
+    "project_id": "acompanhamento-nutricion-d7160",
+    "storage_bucket": "acompanhamento-nutricion-d7160.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1003473714651:android:17833d0f1cb8b481703bfe",
+        "android_client_info": {
+          "package_name": "com.example.acompanhamento_nutricional"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB3DVtuT6UkSWHB2BoynTYaWKcn7nz9k2Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
