@@ -68,53 +68,69 @@ class _AssessmentPageState extends State<AssessmentPage> {
         String text = PdfTextExtractor(document).extractText();
         document.dispose();
 
-        _parseAndSetData(text);
+        _smartParse(text);
 
         if (mounted) {
           setState(() => _isLoading = false);
+          _isEditing = true;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Dados importados com sucesso! Verifique e salve.', textAlign: TextAlign.center),
+              content: const Text('PDF analisado com sucesso! Verifique os campos destacados.', textAlign: TextAlign.center),
               backgroundColor: Colors.teal.shade700,
               behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 4),
             ),
           );
-          _isEditing = true;
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
+          SnackBar(content: Text('Erro na leitura inteligente: $e'), backgroundColor: Colors.redAccent),
         );
       }
     }
   }
 
-  void _parseAndSetData(String text) {
-    String? extractValue(String key) {
-      final regExp = RegExp('$key[:\\s]+([\\d,\\.]+)');
-      final match = regExp.firstMatch(text);
-      return match?.group(1);
+  void _smartParse(String rawText) {
+    // Normaliza o texto para facilitar a busca (remove excesso de espaços e padroniza quebras)
+    final text = rawText.replaceAll(RegExp(r'\s+'), ' ');
+
+    // Função interna aperfeiçoada com RegExp resiliente
+    String? find(List<String> keys) {
+      for (var key in keys) {
+        // Busca a palavra-chave seguida opcionalmente de : ou - e captura o número (aceita 96,3 ou 96.3)
+        final pattern = RegExp('$key[:\\s\\-]*([\\d+[\\.,]?\\d*)', caseSensitive: false);
+        final match = pattern.firstMatch(text);
+        if (match != null && match.group(1) != null) {
+          return match.group(1)!.replaceAll(',', '.'); // Padroniza para ponto decimal
+        }
+      }
+      return null;
     }
 
     setState(() {
-      _controllers['Peso']?.text = extractValue('Peso') ?? _controllers['Peso']!.text;
-      _controllers['IMC']?.text = extractValue('IMC') ?? _controllers['IMC']!.text;
-      _controllers['PGC']?.text = extractValue('PGC') ?? _controllers['PGC']!.text;
-      _controllers['PME']?.text = extractValue('PME') ?? _controllers['PME']!.text;
-      _controllers['Cintura']?.text = extractValue('Cintura') ?? _controllers['Cintura']!.text;
+      // Mapeamento com Sinônimos para maior precisão
+      _controllers['Peso']?.text = find(['Peso', 'Massa Corporal', 'Peso Atual']) ?? _controllers['Peso']!.text;
+      _controllers['IMC']?.text = find(['IMC', 'Índice de Massa Corporal']) ?? _controllers['IMC']!.text;
+      _controllers['PGC']?.text = find(['PGC', 'Gordura Corporal', '% Gordura', 'Gordura']) ?? _controllers['PGC']!.text;
+      _controllers['PME']?.text = find(['PME', 'Massa Magra', 'Massa Muscular', '% Muscular']) ?? _controllers['PME']!.text;
+      _controllers['Cintura']?.text = find(['Cintura', 'Circunferência Abdominal']) ?? _controllers['Cintura']!.text;
+      _controllers['Quadril']?.text = find(['Quadril']) ?? _controllers['Quadril']!.text;
+      _controllers['MB']?.text = find(['MB', 'Metabolismo Basal', 'TMB', 'Taxa Metabólica']) ?? _controllers['MB']!.text;
+      _controllers['GV']?.text = find(['GV', 'Gordura Visceral', 'Nível Visceral']) ?? _controllers['GV']!.text;
+      _controllers['IC']?.text = find(['IC', 'Idade Corporal', 'Idade Biológica']) ?? _controllers['IC']!.text;
+      
+      // Pregas Cutâneas
+      _controllers['Abdominal']?.text = find(['Abdominal', 'Pregas Abdominal']) ?? _controllers['Abdominal']!.text;
+      _controllers['Triciptal']?.text = find(['Triciptal', 'Tríceps']) ?? _controllers['Triciptal']!.text;
+      _controllers['Subescapular']?.text = find(['Subescapular']) ?? _controllers['Subescapular']!.text;
     });
   }
 
   Color _getStatusColor(String key, String value) {
-    double? val = double.tryParse(value.replaceAll(',', '.'));
+    double? val = double.tryParse(value);
     if (val == null) return Colors.black87;
     switch (key) {
       case 'IMC':
@@ -159,11 +175,7 @@ class _AssessmentPageState extends State<AssessmentPage> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
+          SnackBar(content: Text('Erro ao salvar: $e', textAlign: TextAlign.center), backgroundColor: Colors.redAccent, behavior: SnackBarBehavior.floating),
         );
       }
     }
@@ -180,13 +192,12 @@ class _AssessmentPageState extends State<AssessmentPage> {
         slivers: [
           SliverAppBar(
             expandedHeight: 180.0,
-            floating: false,
             pinned: true,
             backgroundColor: primaryBlue,
             elevation: 0,
             leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importação Inteligente'),
               if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
               else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
             ],

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
-
 class RecipesPage extends StatefulWidget {
   const RecipesPage({super.key});
 
@@ -117,20 +116,31 @@ class _RecipesPageState extends State<RecipesPage> {
 
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Novas receitas identificadas e adicionadas!')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Novas receitas identificadas e adicionadas!', textAlign: TextAlign.center),
+              backgroundColor: Colors.teal.shade700,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao ler PDF: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
 
   void _parseNewRecipes(String text) {
-    // Exemplo de lógica para extrair blocos de receitas novos do PDF
-    // Procura por padrão: TÍTULO DA RECEITA (em maiúsculo) seguido de "Ingredientes" e "Modo de preparo"
     final regExp = RegExp(r'([A-Z\s]+)\nIngredientes\n([\s\S]+?)\nModo de [pP]reparo\n([\s\S]+?)(?=\n[A-Z\s]+\n|$)');
     final matches = regExp.allMatches(text);
 
@@ -140,7 +150,6 @@ class _RecipesPageState extends State<RecipesPage> {
         String ingredients = match.group(2)!.trim();
         String method = match.group(3)!.trim();
 
-        // Adiciona se não existir
         if (!_recipes.any((r) => r['title'] == title)) {
           _recipes.insert(0, {
             'id': DateTime.now().millisecondsSinceEpoch.toString(),
@@ -175,7 +184,7 @@ class _RecipesPageState extends State<RecipesPage> {
             elevation: 0,
             leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar novas receitas'),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
             ],
             flexibleSpace: FlexibleSpaceBar(
               centerTitle: true,
@@ -280,6 +289,14 @@ class _RecipesPageState extends State<RecipesPage> {
                 recipe['method'] = methodController.text;
               });
               Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Receita atualizada!', textAlign: TextAlign.center),
+                  backgroundColor: Colors.teal.shade700,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              );
             },
             child: const Text('SALVAR'),
           ),

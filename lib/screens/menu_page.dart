@@ -28,41 +28,38 @@ class _MenuPageState extends State<MenuPage> {
     'Observações': TextEditingController(),
   };
 
-  final List<String> _breakfastOptions = [
-    'Opção 1: 1 pão francês s/ miolo + 3 ovos mexidos + café + fruta',
-    'Opção 2: 2 fatias pão integral + 3 ovos mexidos + café + fruta',
-    'Opção 3: 1 pão francês s/ miolo + 70g frango desfiado + café + fruta',
-    'Opção 4: 1 crepioca (30g goma + 3 ovos) + 15g requeijão light + café + fruta',
-  ];
-
-  final List<String> _morningSnackOptions = [
-    'Opção 1: 30g de whey protein isolado + 200ml de água + 1 banana nanica',
-    'Opção 2: 1 pote de iogurte natural integral (170g) + 1 banana nanica',
-  ];
-
-  final List<String> _lunchOptions = [
-    'Opção 1: Arroz (120g) + Feijão (90g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-    'Opção 2: Macarrão Integral (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-    'Opção 3: Batata Doce (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-    'Opção 4: Mandioca (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-  ];
-
-  final List<String> _afternoonSnack1Options = [
-    'Opção 1: 1 porção de fruta (maçã, pêra ou goiaba)',
-  ];
-
-  final List<String> _afternoonSnack2Options = [
-    'Opção 1: 1 pão francês s/ miolo + 1 ovo mexido + café',
-    'Opção 2: 2 fatias pão integral + 1 ovo mexido + café',
-    'Opção 3: 2 fatias pão integral + 15g requeijão light + café',
-    'Opção 4: 1 pão francês s/ miolo + 30g patê frango/atum + café',
-    'Opção 5: 2 fatias pão integral + 10g pasta amendoim + café',
-  ];
-
-  final List<String> _dinnerOptions = [
-    'Opção 1: Arroz (100g) + Feijão (60g) + Proteína (140g) + Vegetais A e B + Sobremesa',
-    'Opção 2: Batata Doce (100g) + Proteína (140g) + Vegetais A e B + Sobremesa',
-  ];
+  final Map<String, List<String>> _mealOptions = {
+    'Café da Manhã': [
+      'Opção 1: 1 pão francês s/ miolo + 3 ovos mexidos + café + fruta',
+      'Opção 2: 2 fatias pão integral + 3 ovos mexidos + café + fruta',
+      'Opção 3: 1 pão francês s/ miolo + 70g frango desfiado + café + fruta',
+      'Opção 4: 1 crepioca (30g goma + 3 ovos) + 15g requeijão light + café + fruta',
+    ],
+    'Lanche da Manhã': [
+      'Opção 1: 30g de whey protein isolado + 200ml de água + 1 banana nanica',
+      'Opção 2: 1 pote de iogurte natural integral (170g) + 1 banana nanica',
+    ],
+    'Almoço': [
+      'Opção 1: Arroz (120g) + Feijão (90g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
+      'Opção 2: Macarrão Integral (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
+      'Opção 3: Batata Doce (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
+      'Opção 4: Mandioca (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
+    ],
+    'Lanche da Tarde 1': [
+      'Opção 1: 1 porção de fruta (maçã, pêra ou goiaba)',
+    ],
+    'Lanche da Tarde 2': [
+      'Opção 1: 1 pão francês s/ miolo + 1 ovo mexido + café',
+      'Opção 2: 2 fatias pão integral + 1 ovo mexido + café',
+      'Opção 3: 2 fatias pão integral + 15g requeijão light + café',
+      'Opção 4: 1 pão francês s/ miolo + 30g patê frango/atum + café',
+      'Opção 5: 2 fatias pão integral + 10g pasta amendoim + café',
+    ],
+    'Jantar': [
+      'Opção 1: Arroz (100g) + Feijão (60g) + Proteína (140g) + Vegetais A e B + Sobremesa',
+      'Opção 2: Batata Doce (100g) + Proteína (140g) + Vegetais A e B + Sobremesa',
+    ],
+  };
 
   @override
   void initState() {
@@ -105,12 +102,28 @@ class _MenuPageState extends State<MenuPage> {
         _parseMenu(text);
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cardápio importado! Verifique e salve.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Cardápio importado! Verifique e salve.', textAlign: TextAlign.center),
+              backgroundColor: Colors.teal.shade700,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
           _isEditing = true;
         }
       }
     } catch (e) {
-      if (mounted) { setState(() => _isLoading = false); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao ler PDF: $e'))); }
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -128,9 +141,28 @@ class _MenuPageState extends State<MenuPage> {
     _controllers.forEach((key, controller) => data[key] = controller.text);
     try {
       await _db.saveMenu(data);
-      if (mounted) { setState(() { _isEditing = false; _isLoading = false; }); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cardápio salvo com sucesso!'))); }
+      if (mounted) {
+        setState(() { _isEditing = false; _isLoading = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Cardápio salvo com sucesso!', textAlign: TextAlign.center),
+            backgroundColor: Colors.teal.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
     } catch (e) {
-      if (mounted) { setState(() => _isLoading = false); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e'))); }
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao salvar: $e', textAlign: TextAlign.center),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -251,14 +283,10 @@ class _MenuPageState extends State<MenuPage> {
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  _buildDropdownSection('Café da Manhã', _breakfastOptions, Icons.wb_sunny_outlined, primaryGreen),
-                  _buildDropdownSection('Lanche da Manhã', _morningSnackOptions, Icons.wb_twilight, primaryGreen),
-                  _buildDropdownSection('Almoço', _lunchOptions, Icons.restaurant, primaryGreen),
-                  _buildDropdownSection('Lanche da Tarde 1', _afternoonSnack1Options, Icons.apple, primaryGreen),
-                  _buildDropdownSection('Lanche da Tarde 2', _afternoonSnack2Options, Icons.coffee, primaryGreen),
-                  _buildDropdownSection('Jantar', _dinnerOptions, Icons.nightlight_round, primaryGreen),
-                  _buildMenuCard('Observações', primaryGreen), // Campo Observações adicionado
-                  ..._controllers.keys.where((k) => k != 'Café da Manhã' && k != 'Lanche da Manhã' && k != 'Almoço' && k != 'Lanche da Tarde 1' && k != 'Lanche da Tarde 2' && k != 'Jantar' && k != 'Observações').map((key) => _buildMenuCard(key, primaryGreen)).toList(),
+                  ..._controllers.keys.map((key) {
+                    if (key == 'Observações') return _buildMenuCard(key, primaryGreen);
+                    return _buildDropdownSection(key, _mealOptions[key] ?? [], _getIconForKey(key), primaryGreen);
+                  }).toList(),
                 ],
               ),
             ),
@@ -266,6 +294,18 @@ class _MenuPageState extends State<MenuPage> {
         ],
       ),
     );
+  }
+
+  IconData _getIconForKey(String key) {
+    switch (key) {
+      case 'Café da Manhã': return Icons.wb_sunny_outlined;
+      case 'Lanche da Manhã': return Icons.wb_twilight;
+      case 'Almoço': return Icons.restaurant;
+      case 'Lanche da Tarde 1': return Icons.apple;
+      case 'Lanche da Tarde 2': return Icons.coffee;
+      case 'Jantar': return Icons.nightlight_round;
+      default: return Icons.restaurant_menu;
+    }
   }
 
   Widget _buildDropdownSection(String key, List<String> options, IconData icon, Color themeColor) {
@@ -290,30 +330,43 @@ class _MenuPageState extends State<MenuPage> {
               child: Column(
                 children: [
                   DropdownButtonFormField<String>(
-                    isExpanded: true, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Escolha uma opção'),
+                    isExpanded: true, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Definir plano padrão'),
                     items: options.map((opt) => DropdownMenuItem(value: opt, child: Text(opt, style: const TextStyle(fontSize: 11)))).toList(),
                     onChanged: (val) { if (val != null) setState(() => _controllers[key]!.text = val); },
                   ),
                   const SizedBox(height: 12),
-                  TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Texto personalizado')),
+                  TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Editar descrição do cardápio')),
                   const SizedBox(height: 16),
                 ],
               ),
             )
           else
             Column(
-              children: options.map((opt) {
-                return CheckboxListTile(
-                  title: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black87)),
-                  value: false, activeColor: themeColor, contentPadding: const EdgeInsets.symmetric(horizontal: 16), controlAffinity: ListTileControlAffinity.trailing,
-                  onChanged: (val) async {
-                    if (val == true) {
-                      await _db.logMenuOptionConsumption(key, opt);
-                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Consumo de "${opt.split(':')[0]}" registrado!')));
-                    }
-                  },
-                );
-              }).toList(),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _controllers[key]!.text.isEmpty ? 'Nenhum plano definido.' : _controllers[key]!.text,
+                      style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
+                    ),
+                  ),
+                ),
+                const Divider(),
+                ...options.map((opt) {
+                  return CheckboxListTile(
+                    title: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    value: false, activeColor: themeColor, contentPadding: const EdgeInsets.symmetric(horizontal: 16), controlAffinity: ListTileControlAffinity.trailing,
+                    onChanged: (val) async {
+                      if (val == true) {
+                        await _db.logMenuOptionConsumption(key, opt);
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Consumo de "${opt.split(':')[0]}" registrado!'), backgroundColor: Colors.teal.shade700, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
+                      }
+                    },
+                  );
+                }).toList(),
+              ],
             ),
           if (key == 'Café da Manhã')
             Padding(padding: const EdgeInsets.all(16.0), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), child: const Row(children: [Icon(Icons.info_outline, color: Colors.redAccent, size: 18), SizedBox(width: 8), Expanded(child: Text('OBS: Tomar 6g de creatina após o café.', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent)))]))),
@@ -331,28 +384,11 @@ class _MenuPageState extends State<MenuPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(key == 'Observações' ? Icons.note_alt_outlined : Icons.restaurant_menu, color: themeColor, size: 20),
-                const SizedBox(width: 10),
-                Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
-              ],
-            ),
+            Row(children: [Icon(key == 'Observações' ? Icons.note_alt_outlined : Icons.restaurant_menu, color: themeColor, size: 20), const SizedBox(width: 10), Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey))]),
             const SizedBox(height: 12),
             _isEditing
-                ? TextField(
-                    controller: _controllers[key],
-                    maxLines: null,
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
-                  )
-                : Text(
-                    _controllers[key]!.text.isEmpty ? 'Nenhuma informação cadastrada.' : _controllers[key]!.text,
-                    style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.black54),
-                  ),
+                ? TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)))
+                : Text(_controllers[key]!.text.isEmpty ? 'Nenhuma informação cadastrada.' : _controllers[key]!.text, style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.black54)),
           ],
         ),
       ),

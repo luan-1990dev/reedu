@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 
 class SupplementationPage extends StatefulWidget {
@@ -31,6 +33,29 @@ class _SupplementationPageState extends State<SupplementationPage> {
   };
 
   @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists && doc.data()!.containsKey('supplements')) {
+        final Map<String, dynamic> saved = doc.data()!['supplements'];
+        setState(() {
+          saved.forEach((key, value) {
+            if (_controllers.containsKey(key)) {
+              _controllers[key]!.text = value.toString();
+            }
+          });
+        });
+      }
+    }
+  }
+
+  @override
   void dispose() {
     for (var c in _controllers.values) { c.dispose(); }
     super.dispose();
@@ -45,19 +70,30 @@ class _SupplementationPageState extends State<SupplementationPage> {
         final PdfDocument document = PdfDocument(inputBytes: file.readAsBytesSync());
         String text = PdfTextExtractor(document).extractText();
         document.dispose();
-
         _parseSupplements(text);
-
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suplementos importados! Verifique e salve.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Suplementos importados! Verifique e salve.', textAlign: TextAlign.center),
+              backgroundColor: Colors.teal.shade700,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
           _isEditing = true;
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao ler PDF: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -80,10 +116,26 @@ class _SupplementationPageState extends State<SupplementationPage> {
       await _db.saveSupplements(data);
       if (mounted) {
         setState(() { _isEditing = false; _isLoading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suplementação salva com sucesso!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Suplementação salva com sucesso!', textAlign: TextAlign.center),
+            backgroundColor: Colors.teal.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
       }
     } catch (e) {
-      if (mounted) { setState(() => _isLoading = false); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e'))); }
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao salvar: $e', textAlign: TextAlign.center),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -97,10 +149,7 @@ class _SupplementationPageState extends State<SupplementationPage> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 150.0,
-            pinned: true,
-            backgroundColor: primaryPurple,
-            elevation: 0,
+            expandedHeight: 150.0, pinned: true, backgroundColor: primaryPurple, elevation: 0,
             leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
             actions: [
               IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
@@ -117,42 +166,62 @@ class _SupplementationPageState extends State<SupplementationPage> {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]),
-                    child: Column(
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Row(children: [Icon(Icons.medication, color: primaryPurple), SizedBox(width: 10), Text('FÓRMULA MANIPULADA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))]),
+          StreamBuilder<DocumentSnapshot>(
+            stream: _db.todayStats,
+            builder: (context, snapshot) {
+              final stats = snapshot.data?.data() as Map<String, dynamic>?;
+              final mealChecks = stats?['meal_checks'] ?? {};
+              final bool isTaken = mealChecks['suplementos'] == true;
+
+              return SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25)),
+                        child: CheckboxListTile(
+                          title: const Text('Tomei meus suplementos hoje', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          subtitle: const Text('Clique para registrar o consumo do dia', style: TextStyle(fontSize: 12)),
+                          value: isTaken,
+                          activeColor: primaryPurple,
+                          onChanged: (val) => _db.toggleMealCompletion('suplementos', val ?? false),
                         ),
-                        ..._controllers.keys.map((key) => _buildSupplementRow(key, primaryPurple)).toList(),
-                        const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text('Posologia: Tomar 1 dose ao dia após o café.', style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple, fontSize: 13)),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+                        child: Column(
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Row(children: [Icon(Icons.medication, color: primaryPurple), SizedBox(width: 10), Text('FÓRMULA MANIPULADA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))]),
+                            ),
+                            ..._controllers.keys.map((key) => _buildSupplementRow(key, primaryPurple)).toList(),
+                            const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text('Posologia: Tomar 1 dose ao dia após o café.', style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple, fontSize: 13)),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 20),
+                      _buildBrandSection(),
+                      const SizedBox(height: 20),
+                      _buildBeerSection(),
+                      const SizedBox(height: 40),
+                    ],
                   ),
-                  const SizedBox(height: 20),
-                  _buildBrandSection(),
-                  const SizedBox(height: 20),
-                  _buildBeerSection(),
-                  const SizedBox(height: 40),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSupplementRow(String key, Color primaryPurple) {
+  Widget _buildSupplementRow(String key, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -160,8 +229,8 @@ class _SupplementationPageState extends State<SupplementationPage> {
         children: [
           Text(key, style: const TextStyle(color: Colors.black54, fontSize: 14)),
           _isEditing 
-            ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple), decoration: const InputDecoration(isDense: true)))
-            : Text(_controllers[key]!.text, style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple, fontSize: 15)),
+            ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: color), decoration: const InputDecoration(isDense: true)))
+            : Text(_controllers[key]!.text, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 15)),
         ],
       ),
     );
