@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -9,29 +10,73 @@ class AuthService {
   final LocalAuthentication _localAuth = LocalAuthentication();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
-  // Obter o usuário atual
   User? get currentUser => _auth.currentUser;
-
-  // Fluxo de autenticação (Stream)
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Login com e-mail e senha
-  Future<UserCredential> signInWithEmail(String email, String password) async {
-    UserCredential credential = await _auth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    // Após o primeiro login bem-sucedido, podemos salvar o email para biometria
-    await _storage.write(key: 'user_email', value: email);
-    await _storage.write(key: 'user_password', value: password);
-    return credential;
+  Future<void> signInWithEmail(String email, String password) async {
+    try {
+      debugPrint("Tentando login com e-mail: $email");
+      await _auth.signInWithEmailAndPassword(email: email, password: password);
+      debugPrint("Login bem-sucedido!");
+      
+      await _storage.write(key: 'user_email', value: email);
+      await _storage.write(key: 'user_password', value: password);
+    } on FirebaseAuthException catch (e) {
+      debugPrint("ERRO FIREBASE AUTH: Código=[${e.code}] Mensagem=[${e.message}]");
+      throw _handleAuthError(e);
+    } catch (e) {
+      debugPrint("ERRO DESCONHECIDO NO LOGIN: $e");
+      throw 'Erro inesperado ao tentar logar.';
+    }
   }
 
-  // Login com Google
+  Future<void> signUpWithEmail(String email, String password, String name) async {
+    try {
+      debugPrint("Tentando cadastrar: $email");
+      UserCredential credential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      await credential.user?.updateDisplayName(name);
+      debugPrint("Cadastro realizado com sucesso!");
+    } on FirebaseAuthException catch (e) {
+      debugPrint("ERRO FIREBASE SIGNUP: Código=[${e.code}] Mensagem=[${e.message}]");
+      throw _handleAuthError(e);
+    }
+  }
+
+  String _handleAuthError(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'user-not-found':
+        return 'E-mail não encontrado. Crie uma conta primeiro.';
+      case 'wrong-password':
+        return 'Senha incorreta. Tente novamente.';
+      case 'email-already-in-use':
+        return 'Este e-mail já está cadastrado. Tente fazer login.';
+      case 'invalid-email':
+        return 'O formato do e-mail é inválido.';
+      case 'weak-password':
+        return 'A senha deve ter pelo menos 6 caracteres.';
+      case 'user-disabled':
+        return 'Este usuário foi desativado.';
+      case 'operation-not-allowed':
+        return 'O login com e-mail e senha não está ativado no Firebase Console.';
+      case 'invalid-credential':
+        // Este erro acontece muito quando a conta foi criada via Google
+        return 'Credenciais inválidas. Se você criou a conta com o Google, use o botão Entrar com Google.';
+      default:
+        return 'Erro de autenticação (${e.code}): ${e.message}';
+    }
+  }
+
   Future<UserCredential?> signInWithGoogle() async {
     try {
+      debugPrint("Iniciando Google Sign-In...");
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null;
+      if (googleUser == null) {
+        debugPrint("Usuário cancelou o login do Google.");
+        return null;
+      }
 
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
@@ -40,22 +85,20 @@ class AuthService {
       );
 
       UserCredential userCredential = await _auth.signInWithCredential(credential);
-      // Salva o email para biometria futura (mesmo com Google)
+      debugPrint("Login com Google bem-sucedido: ${userCredential.user?.email}");
+      
       await _storage.write(key: 'user_email', value: userCredential.user?.email);
       return userCredential;
     } catch (e) {
-      print("Erro no Google Sign-In: $e");
+      debugPrint("ERRO NO GOOGLE SIGN-IN: $e");
       return null;
     }
   }
 
-  // Login via Biometria
   Future<UserCredential?> signInWithBiometrics() async {
     try {
       final bool canAuthenticateWithBiometrics = await _localAuth.canCheckBiometrics;
-      final bool isDeviceSupported = await _localAuth.isDeviceSupported();
-
-      if (!canAuthenticateWithBiometrics || !isDeviceSupported) return null;
+      if (!canAuthenticateWithBiometrics) return null;
 
       final bool didAuthenticate = await _localAuth.authenticate(
         localizedReason: 'Autentique-se para entrar no app',
@@ -72,22 +115,11 @@ class AuthService {
       }
       return null;
     } catch (e) {
-      print("Erro na Biometria: $e");
+      debugPrint("Erro na Biometria: $e");
       return null;
     }
   }
 
-  // Cadastro com e-mail e senha
-  Future<UserCredential> signUpWithEmail(String email, String password, String name) async {
-    UserCredential credential = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    await credential.user?.updateDisplayName(name);
-    return credential;
-  }
-
-  // Logout
   Future<void> signOut() async {
     await _googleSignIn.signOut();
     await _auth.signOut();

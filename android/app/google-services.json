@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1003473714651:android:17833d0f1cb8b481703bfe",
+        "mobilesdk_app_id": "1:1003473714651:android:fcb3e1294fb2c475703bfe",
         "android_client_info": {
-          "package_name": "com.example.acompanhamento_nutricional"
+          "package_name": "com.luan1990dev.reedu"
         }
       },
       "oauth_client": [],

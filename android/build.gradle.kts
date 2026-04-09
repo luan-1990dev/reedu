@@ -1,12 +1,29 @@
 plugins {
-    // Add the dependency for the Google services Gradle plugin
     id("com.google.gms.google-services") version "4.4.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+}
+
+subprojects {
+    afterEvaluate {
+        if (project.hasProperty("android")) {
+            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
+            android.compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            }
+        }
     }
 }
 

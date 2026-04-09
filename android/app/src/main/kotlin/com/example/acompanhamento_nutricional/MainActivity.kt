@@ -1,5 +1,5 @@
-package com.example.acompanhamento_nutricional
+package com.luan1990dev.reedu
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+class MainActivity: FlutterFragmentActivity()

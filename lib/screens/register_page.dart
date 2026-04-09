@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
 
@@ -23,65 +22,38 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _isLoading = false;
 
   Future<void> _register() async {
-    // Validações básicas
     if (_nameController.text.trim().isEmpty || 
         _emailController.text.trim().isEmpty || 
         _passwordController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, preencha todos os campos.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, preencha todos os campos.')));
       return;
     }
 
     if (_passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('As senhas não coincidem.')),
-      );
-      return;
-    }
-
-    if (_passwordController.text.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A senha deve ter pelo menos 6 caracteres.')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('As senhas não coincidem.')));
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      // 1. Criar o usuário no Firebase Auth
       await _authService.signUpWithEmail(
         _emailController.text.trim(),
         _passwordController.text.trim(),
         _nameController.text.trim(),
       );
       
-      // 2. Criar o perfil do usuário no Firestore (Banco de Dados)
-      // O UID é pego automaticamente dentro do service após o login
       await _databaseService.saveUserProfile(
         _nameController.text.trim(),
         _emailController.text.trim(),
       );
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Conta criada com sucesso!')),
-        );
-        // O main.dart já redirecionará automaticamente para a Home via StreamBuilder
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Conta criada com sucesso!')));
         Navigator.pop(context);
-      }
-    } on FirebaseAuthException catch (e) {
-      String message = 'Ocorreu um erro ao cadastrar.';
-      if (e.code == 'weak-password') message = 'A senha é muito fraca.';
-      else if (e.code == 'email-already-in-use') message = 'Este e-mail já está em uso.';
-      else if (e.code == 'invalid-email') message = 'E-mail inválido.';
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro inesperado: \$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);

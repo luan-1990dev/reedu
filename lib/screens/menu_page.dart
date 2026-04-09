@@ -86,53 +86,8 @@ class _MenuPageState extends State<MenuPage> {
 
   @override
   void dispose() {
-    for (var c in _controllers.values) { c.dispose(); }
+    _controllers.values.forEach((c) => c.dispose());
     super.dispose();
-  }
-
-  Future<void> _importPDF() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-      if (result != null) {
-        setState(() => _isLoading = true);
-        File file = File(result.files.single.path!);
-        final PdfDocument document = PdfDocument(inputBytes: file.readAsBytesSync());
-        String text = PdfTextExtractor(document).extractText();
-        document.dispose();
-        _parseMenu(text);
-        if (mounted) {
-          setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Cardápio importado! Verifique e salve.', textAlign: TextAlign.center),
-              backgroundColor: Colors.teal.shade700,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-          );
-          _isEditing = true;
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  void _parseMenu(String text) {
-    _controllers.forEach((key, controller) {
-      final regExp = RegExp(key + r'[\s:]+([\s\S]+?)(?=\n[A-Z][a-z]+ da|\nAlmoço|\nJantar|\nObservações|$)');
-      final match = regExp.firstMatch(text);
-      if (match != null) { setState(() => controller.text = match.group(1)!.trim()); }
-    });
   }
 
   Future<void> _saveData() async {
@@ -153,16 +108,7 @@ class _MenuPageState extends State<MenuPage> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -200,7 +146,6 @@ class _MenuPageState extends State<MenuPage> {
                         await _db.clearMenuStats();
                         if (context.mounted) Navigator.pop(context);
                       },
-                      tooltip: 'Limpar tudo',
                     ),
                   ],
                 ),
@@ -209,7 +154,7 @@ class _MenuPageState extends State<MenuPage> {
                   stream: _db.topMenuOptions,
                   builder: (context, snapshot) {
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text("Nenhum dado registrado.", textAlign: TextAlign.center)));
+                      return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text("Nenhum dado registrado.")));
                     }
                     return ListView.builder(
                       shrinkWrap: true,
@@ -221,8 +166,7 @@ class _MenuPageState extends State<MenuPage> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Expanded(child: Text('${data['mealType']}: ${snapshot.data!.docs[index].id.split(':')[0]}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                              const SizedBox(width: 8),
+                              Expanded(child: Text('${data['mealType']}: ${snapshot.data!.docs[index].id.split(':')[0]}', style: const TextStyle(fontSize: 13))),
                               Text('${data['count']}x', style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.bold)),
                             ],
                           ),
@@ -238,7 +182,7 @@ class _MenuPageState extends State<MenuPage> {
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                    child: const Text('FECHAR', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text('FECHAR'),
                   ),
                 ),
               ],
@@ -259,7 +203,7 @@ class _MenuPageState extends State<MenuPage> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 150.0, pinned: true, backgroundColor: primaryGreen, elevation: 0,
+            expandedHeight: 120.0, pinned: true, backgroundColor: primaryGreen, elevation: 0,
             leadingWidth: 100,
             leading: Row(
               children: [
@@ -268,7 +212,7 @@ class _MenuPageState extends State<MenuPage> {
               ],
             ),
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: () {}, tooltip: 'Importar PDF'),
               if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
               else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
             ],
@@ -330,12 +274,12 @@ class _MenuPageState extends State<MenuPage> {
               child: Column(
                 children: [
                   DropdownButtonFormField<String>(
-                    isExpanded: true, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Definir plano padrão'),
+                    isExpanded: true, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Modelo sugerido'),
                     items: options.map((opt) => DropdownMenuItem(value: opt, child: Text(opt, style: const TextStyle(fontSize: 11)))).toList(),
                     onChanged: (val) { if (val != null) setState(() => _controllers[key]!.text = val); },
                   ),
                   const SizedBox(height: 12),
-                  TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Editar descrição do cardápio')),
+                  TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Sua receita personalizada')),
                   const SizedBox(height: 16),
                 ],
               ),
@@ -345,27 +289,19 @@ class _MenuPageState extends State<MenuPage> {
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _controllers[key]!.text.isEmpty ? 'Nenhum plano definido.' : _controllers[key]!.text,
-                      style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
-                    ),
-                  ),
+                  child: Align(alignment: Alignment.centerLeft, child: Text(_controllers[key]!.text.isEmpty ? 'Nenhum plano definido.' : _controllers[key]!.text, style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4))),
                 ),
                 const Divider(),
-                ...options.map((opt) {
-                  return CheckboxListTile(
-                    title: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black87)),
-                    value: false, activeColor: themeColor, contentPadding: const EdgeInsets.symmetric(horizontal: 16), controlAffinity: ListTileControlAffinity.trailing,
-                    onChanged: (val) async {
-                      if (val == true) {
-                        await _db.logMenuOptionConsumption(key, opt);
-                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Consumo de "${opt.split(':')[0]}" registrado!'), backgroundColor: Colors.teal.shade700, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
-                      }
-                    },
-                  );
-                }).toList(),
+                ...options.map((opt) => CheckboxListTile(
+                  title: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                  value: false, activeColor: themeColor, controlAffinity: ListTileControlAffinity.trailing,
+                  onChanged: (val) async {
+                    if (val == true) {
+                      await _db.logMenuOptionConsumption(key, opt);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Consumo de "${opt.split(':')[0]}" registrado!'), backgroundColor: Colors.teal.shade700, behavior: SnackBarBehavior.floating));
+                    }
+                  },
+                )).toList(),
               ],
             ),
           if (key == 'Café da Manhã')

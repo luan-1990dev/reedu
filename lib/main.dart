@@ -10,7 +10,7 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // MODO IMERSIVO TOTAL (Edge-to-Edge)
+  // MODO IMERSIVO TOTAL
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -24,25 +24,23 @@ void main() async {
   bool firebaseInitialized = false;
 
   try {
+    // Inicialização segura do Firebase
     await Firebase.initializeApp();
     firebaseInitialized = true;
-    _initNotifications();
   } catch (e) {
-    debugPrint("ERRO CRÍTICO na inicialização: \$e");
+    debugPrint("ERRO na inicialização do Firebase: \$e");
   }
   
   runApp(MyApp(isFirebaseReady: firebaseInitialized));
 }
 
-Future<void> _initNotifications() async {
+// Movido para fora do main para evitar travamentos na abertura
+Future<void> _setupNotificationsSafe() async {
   try {
     final notificationService = NotificationService();
     await notificationService.initNotification();
-    
-    // 1. Agenda lembretes de água (Independente de horários de comida)
     await notificationService.scheduleWaterReminders();
     
-    // 2. Busca os horários salvos para agendar as notificações de refeição
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
@@ -52,7 +50,7 @@ Future<void> _initNotifications() async {
       }
     }
   } catch (e) {
-    debugPrint("Erro ao configurar notificações: \$e");
+    debugPrint("Erro silencioso em notificações: \$e");
   }
 }
 
@@ -62,10 +60,13 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dispara a configuração de notificações após o primeiro frame para não travar o splash
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (isFirebaseReady) _setupNotificationsSafe();
+    });
+
     return GestureDetector(
-      onTap: () {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      },
+      onTap: () => SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
       child: MaterialApp(
         title: 'Reedu',
         debugShowCheckedModeBanner: false,
@@ -74,7 +75,7 @@ class MyApp extends StatelessWidget {
           useMaterial3: true,
         ),
         home: !isFirebaseReady 
-            ? const Scaffold(body: Center(child: Text("Erro ao carregar o Firebase.")))
+            ? const Scaffold(body: Center(child: Text("Erro de conexão. Verifique a internet.")))
             : StreamBuilder<User?>(
                 stream: FirebaseAuth.instance.authStateChanges(),
                 builder: (context, snapshot) {

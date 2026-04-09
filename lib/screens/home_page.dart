@@ -13,6 +13,7 @@ import 'recipes_page.dart';
 import 'supplementation_page.dart';
 import 'meal_schedule_page.dart';
 import 'menu_page.dart';
+import 'diet_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -31,26 +32,32 @@ class _HomePageState extends State<HomePage> {
     
     if (image != null) {
       setState(() => _isUploading = true);
-      // Nota: Para um app real, aqui você faria o upload para o Firebase Storage.
-      // Como estamos focando no layout, vamos simular a atualização do link no Firestore.
-      // Em uma implementação completa, o link viria do Storage.
       await _db.updateProfilePicture(image.path); 
       if (mounted) {
         setState(() => _isUploading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Foto atualizada! No APK final ela aparecerá aqui.', textAlign: TextAlign.center),
+            content: const Text('Foto de perfil atualizada!', textAlign: TextAlign.center),
             backgroundColor: Colors.teal.shade700,
             behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           )
         );
       }
     }
   }
 
-  Map<String, dynamic> _getNextMealInfo(List<dynamic>? customSchedules) {
+  Map<String, dynamic> _getNextMealInfo(List<dynamic>? customSchedules, Map<String, dynamic>? customMenu) {
     final now = DateTime.now();
     final currentTimeInMinutes = now.hour * 60 + now.minute;
+
+    // Função auxiliar para pegar opções (prioriza o que o usuário escreveu no Meu Cardápio)
+    List<String> getOptions(String mealName) {
+      if (customMenu != null && customMenu.containsKey(mealName) && customMenu[mealName].toString().isNotEmpty) {
+        return [customMenu[mealName].toString()];
+      }
+      return DietService.mealOptions[mealName] ?? ['Ver plano detalhado'];
+    }
 
     if (customSchedules != null && customSchedules.isNotEmpty) {
       List<dynamic> sortedSchedules = List.from(customSchedules);
@@ -59,31 +66,25 @@ class _HomePageState extends State<HomePage> {
 
       for (var meal in sortedSchedules) {
         final mealTimeInMinutes = (meal['hour'] as int) * 60 + (meal['minute'] as int);
-        if (mealTimeInMinutes > currentTimeInMinutes) {
+        if (mealTimeInMinutes > currentTimeInMinutes - 30) { // Margem de 30min para refeição atual
           return {
             'title': meal['name'],
             'time': '${meal['hour'].toString().padLeft(2, '0')}:${meal['minute'].toString().padLeft(2, '0')}',
-            'options': DietService.mealOptions[meal['name']] ?? ['Ver plano alimentar'],
+            'options': getOptions(meal['name']),
             'key': DietService.getMealKey(meal['name'])
           };
         }
       }
-      final firstMeal = sortedSchedules.first;
-      return {
-        'title': firstMeal['name'],
-        'time': 'Amanhã às ${firstMeal['hour'].toString().padLeft(2, '0')}:${firstMeal['minute'].toString().padLeft(2, '0')}',
-        'options': DietService.mealOptions[firstMeal['name']] ?? [],
-        'key': DietService.getMealKey(firstMeal['name'])
-      };
     }
     
+    // Fallback inteligente baseado em faixas de horário
     final hour = now.hour;
-    if (hour < 9) return {'title': 'Café da Manhã', 'time': '05:30', 'options': DietService.mealOptions['Café da Manhã'], 'key': 'cafe'};
-    if (hour < 12) return {'title': 'Lanche da Manhã', 'time': '09:00', 'options': DietService.mealOptions['Lanche da Manhã'], 'key': 'lanche_m'};
-    if (hour < 15) return {'title': 'Almoço', 'time': '12:30', 'options': DietService.mealOptions['Almoço'], 'key': 'almoco'};
-    if (hour < 18) return {'title': 'Lanche da Tarde 1', 'time': '16:00', 'options': DietService.mealOptions['Lanche da Tarde 1'], 'key': 'lanche_t1'};
-    if (hour < 20) return {'title': 'Lanche da Tarde 2', 'time': '18:00', 'options': DietService.mealOptions['Lanche da Tarde 2'], 'key': 'lanche_t2'};
-    return {'title': 'Jantar', 'time': '20:00', 'options': DietService.mealOptions['Jantar'], 'key': 'jantar'};
+    if (hour < 9) return {'title': 'Café da Manhã', 'time': '05:30', 'options': getOptions('Café da Manhã'), 'key': 'cafe'};
+    if (hour < 12) return {'title': 'Lanche da Manhã', 'time': '09:00', 'options': getOptions('Lanche da Manhã'), 'key': 'lanche_m'};
+    if (hour < 15) return {'title': 'Almoço', 'time': '12:30', 'options': getOptions('Almoço'), 'key': 'almoco'};
+    if (hour < 18) return {'title': 'Lanche da Tarde 1', 'time': '16:00', 'options': getOptions('Lanche da Tarde 1'), 'key': 'lanche_t1'};
+    if (hour < 20) return {'title': 'Lanche da Tarde 2', 'time': '18:00', 'options': getOptions('Lanche da Tarde 2'), 'key': 'lanche_t2'};
+    return {'title': 'Jantar', 'time': '20:00', 'options': getOptions('Jantar'), 'key': 'jantar'};
   }
 
   void _showAddWeightDialog(BuildContext context, DatabaseService db) {
@@ -185,7 +186,8 @@ class _HomePageState extends State<HomePage> {
                 String firstName = fullName.split(' ')[0];
                 String? photoUrl = profileData?['photoUrl'];
                 final List<dynamic>? schedules = profileData?['meal_schedules'];
-                final nextMeal = _getNextMealInfo(schedules);
+                final Map<String, dynamic>? customMenu = profileData?['menu'];
+                final nextMeal = _getNextMealInfo(schedules, customMenu);
                 final waterTarget = (profileData?['waterTarget'] ?? 4.0) as double;
 
                 return StreamBuilder<DocumentSnapshot>(
@@ -244,10 +246,7 @@ class _HomePageState extends State<HomePage> {
                                       children: [
                                         Container(
                                           padding: const EdgeInsets.all(3),
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: const LinearGradient(colors: [primaryBlue, Colors.tealAccent]),
-                                          ),
+                                          decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [primaryBlue, Colors.tealAccent])),
                                           child: CircleAvatar(
                                             radius: 32,
                                             backgroundColor: Colors.white,
@@ -259,16 +258,8 @@ class _HomePageState extends State<HomePage> {
                                                 : null,
                                           ),
                                         ),
-                                        Positioned(
-                                          bottom: 0, right: 0,
-                                          child: Container(
-                                            padding: const EdgeInsets.all(4),
-                                            decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle),
-                                            child: const Icon(Icons.camera_alt, color: Colors.white, size: 12),
-                                          ),
-                                        ),
-                                        if (_isUploading)
-                                          const Positioned.fill(child: CircularProgressIndicator(strokeWidth: 2)),
+                                        Positioned(bottom: 0, right: 0, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle), child: const Icon(Icons.camera_alt, color: Colors.white, size: 12))),
+                                        if (_isUploading) const Positioned.fill(child: CircularProgressIndicator(strokeWidth: 2)),
                                       ],
                                     ),
                                   ),
@@ -284,35 +275,33 @@ class _HomePageState extends State<HomePage> {
                               ),
                               const SizedBox(height: 25),
 
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(20),
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(colors: [primaryBlue, Color(0xFF4285F4)]),
-                                  borderRadius: BorderRadius.circular(30),
-                                  boxShadow: [BoxShadow(color: primaryBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(children: [const Icon(Icons.auto_awesome, color: Colors.white, size: 20), const SizedBox(width: 8), Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12))]),
-                                    const SizedBox(height: 12),
-                                    Text(nextMeal['title']!, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold)),
-                                    Text('Horário Planejado: ${nextMeal['time']}', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
-                                    const SizedBox(height: 16),
-                                    ... (nextMeal['options'] as List).map((opt) {
-                                      bool isSelected = mealChecks[nextMeal['key']] == opt;
-                                      return GestureDetector(
-                                        onTap: () => _db.toggleMealCompletion(nextMeal['key'], !isSelected ? opt : false),
-                                        child: Container(
-                                          margin: const EdgeInsets.only(bottom: 10),
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                          decoration: BoxDecoration(color: isSelected ? Colors.white : Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white.withOpacity(0.3))),
-                                          child: Row(children: [Icon(isSelected ? Icons.check_circle : Icons.circle_outlined, color: isSelected ? primaryBlue : Colors.white, size: 20), const SizedBox(width: 10), Expanded(child: Text(opt, style: TextStyle(color: isSelected ? primaryBlue : Colors.white, fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)))]),
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ],
+                              // Card de Sugestão Ativa (Agora integrado ao que o usuário escreveu no Cardápio)
+                              GestureDetector(
+                                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DietPage())),
+                                child: Container(
+                                  width: double.infinity, padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(gradient: const LinearGradient(colors: [primaryBlue, Color(0xFF4285F4)]), borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: primaryBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(children: [const Icon(Icons.auto_awesome, color: Colors.white, size: 20), const SizedBox(width: 8), Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12))]),
+                                      const SizedBox(height: 12),
+                                      Text(nextMeal['title']!, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold)),
+                                      Text('Horário Planejado: ${nextMeal['time']}', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
+                                      const SizedBox(height: 16),
+                                      ... (nextMeal['options'] as List).map((opt) {
+                                        bool isSelected = mealChecks[nextMeal['key']] == opt;
+                                        return GestureDetector(
+                                          onTap: () => _db.toggleMealCompletion(nextMeal['key'], !isSelected ? opt : false),
+                                          child: Container(
+                                            margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                            decoration: BoxDecoration(color: isSelected ? Colors.white : Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white.withOpacity(0.3))),
+                                            child: Row(children: [Icon(isSelected ? Icons.check_circle : Icons.circle_outlined, color: isSelected ? primaryBlue : Colors.white, size: 20), const SizedBox(width: 10), Expanded(child: Text(opt, style: TextStyle(color: isSelected ? primaryBlue : Colors.white, fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)))]),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ],
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 30),
@@ -376,6 +365,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSummaryCard(IconData icon, String label, String value, Color color, double progress) {
-    return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: color, size: 32), const SizedBox(height: 10), Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)), Text(value, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)), const SizedBox(height: 12), ClipRRect(borderRadius: BorderRadius.circular(10), child: LinearProgressIndicator(value: progress.clamp(0.0, 1.0), backgroundColor: color.withOpacity(0.1), valueColor: AlwaysStoppedAnimation<Color>(color), minHeight: 6))]));
+    return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: color, size: 24), const SizedBox(height: 10), Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)), Text(value, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)), const SizedBox(height: 12), ClipRRect(borderRadius: BorderRadius.circular(10), child: LinearProgressIndicator(value: progress.clamp(0.0, 1.0), backgroundColor: color.withOpacity(0.1), valueColor: AlwaysStoppedAnimation<Color>(color), minHeight: 6))]));
   }
 }
