@@ -35,9 +35,7 @@ class _LoginPageState extends State<LoginPage> {
         _emailController.text.trim(), 
         _passwordController.text.trim()
       );
-      // O redirecionamento acontece automaticamente via StreamBuilder no main.dart
     } catch (e) {
-      debugPrint("Erro capturado na UI: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -71,7 +69,6 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      debugPrint("Erro Google Sign-In na UI: $e");
     }
   }
 
@@ -89,9 +86,7 @@ class _LoginPageState extends State<LoginPage> {
           );
         }
       }
-    } catch (e) {
-      debugPrint("Erro Biometria na UI: $e");
-    }
+    } catch (e) {}
   }
 
   @override
@@ -114,15 +109,16 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock_person_rounded, size: 80, color: primaryBlue),
-                const SizedBox(height: 20),
-                const Text(
-                  'Bem-vindo de volta!',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+                // LOGOTIPO REEDU SUBSTITUINDO O TEXTO
+                Image.asset(
+                  'assets/icon/app_icon.png', 
+                  height: 120,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.lock_person_rounded, size: 80, color: primaryBlue),
                 ),
+                const SizedBox(height: 30),
                 const Text(
                   'Acesse sua conta para continuar.',
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 40),
                 TextField(

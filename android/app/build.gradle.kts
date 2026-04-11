@@ -25,8 +25,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // Removido o compilerOptions daqui de dentro para evitar o erro de referência não resolvida
-
     signingConfigs {
         getByName("debug") {
             if (keystoreProperties.isNotEmpty()) {
@@ -50,8 +48,9 @@ android {
         applicationId = "com.luan1990dev.reedu"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.0.1"
+        // Atualizado para v13 para sincronizar com pubspec.yaml
+        versionCode = 13
+        versionName = "1.0.2"
     }
 
     buildTypes {
@@ -64,7 +63,6 @@ android {
     }
 }
 
-// Configuração do Kotlin movida para o nível superior, que é o padrão correto para Kotlin 2.0+
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../services/diet_service.dart';
+import '../services/notification_service.dart';
 import 'assessment_page.dart';
 import 'recipes_page.dart';
 import 'supplementation_page.dart';
@@ -24,7 +25,16 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final DatabaseService _db = DatabaseService();
+  final NotificationService _notifications = NotificationService();
   bool _isUploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifications.requestAllPermissions(context);
+    });
+  }
 
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
@@ -51,7 +61,6 @@ class _HomePageState extends State<HomePage> {
     final now = DateTime.now();
     final currentTimeInMinutes = now.hour * 60 + now.minute;
 
-    // Função auxiliar para pegar opções (prioriza o que o usuário escreveu no Meu Cardápio)
     List<String> getOptions(String mealName) {
       if (customMenu != null && customMenu.containsKey(mealName) && customMenu[mealName].toString().isNotEmpty) {
         return [customMenu[mealName].toString()];
@@ -66,7 +75,7 @@ class _HomePageState extends State<HomePage> {
 
       for (var meal in sortedSchedules) {
         final mealTimeInMinutes = (meal['hour'] as int) * 60 + (meal['minute'] as int);
-        if (mealTimeInMinutes > currentTimeInMinutes - 30) { // Margem de 30min para refeição atual
+        if (mealTimeInMinutes > currentTimeInMinutes - 30) {
           return {
             'title': meal['name'],
             'time': '${meal['hour'].toString().padLeft(2, '0')}:${meal['minute'].toString().padLeft(2, '0')}',
@@ -77,7 +86,6 @@ class _HomePageState extends State<HomePage> {
       }
     }
     
-    // Fallback inteligente baseado em faixas de horário
     final hour = now.hour;
     if (hour < 9) return {'title': 'Café da Manhã', 'time': '05:30', 'options': getOptions('Café da Manhã'), 'key': 'cafe'};
     if (hour < 12) return {'title': 'Lanche da Manhã', 'time': '09:00', 'options': getOptions('Lanche da Manhã'), 'key': 'lanche_m'};
@@ -149,7 +157,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final authService = AuthService();
-    final user = FirebaseAuth.instance.currentUser;
     const Color primaryBlue = Color(0xFF1967D2);
     const Color backgroundColor = Color(0xFFF0F4F8);
 
@@ -158,7 +165,7 @@ class _HomePageState extends State<HomePage> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 120.0,
+            expandedHeight: 100.0,
             floating: false,
             pinned: true,
             backgroundColor: primaryBlue,
@@ -169,7 +176,7 @@ class _HomePageState extends State<HomePage> {
             ],
             flexibleSpace: FlexibleSpaceBar(
               centerTitle: true,
-              title: const Text('Reedu', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20, letterSpacing: 2)),
+              title: Image.asset('assets/icon/app_icon.png', height: 40, errorBuilder: (_, __, ___) => const Text('Reedu', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
               background: Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryBlue, Color(0xFF4285F4)]),
@@ -182,7 +189,7 @@ class _HomePageState extends State<HomePage> {
               stream: _db.userProfileStream,
               builder: (context, profileSnap) {
                 final profileData = profileSnap.data?.data() as Map<String, dynamic>?;
-                String fullName = profileData?['nickname'] ?? profileData?['name'] ?? user?.displayName ?? 'Usuário';
+                String fullName = profileData?['nickname'] ?? profileData?['name'] ?? FirebaseAuth.instance.currentUser?.displayName ?? 'Usuário';
                 String firstName = fullName.split(' ')[0];
                 String? photoUrl = profileData?['photoUrl'];
                 final List<dynamic>? schedules = profileData?['meal_schedules'];
@@ -207,7 +214,7 @@ class _HomePageState extends State<HomePage> {
                         if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
                           var docs = weightSnap.data!.docs;
                           for (int i = 0; i < docs.length; i++) {
-                            var weight = double.tryParse(docs[i]['Peso'].toString()) ?? 0;
+                            var weight = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
                             weightSpots.add(FlSpot(i.toDouble(), weight));
                             currentWeight = weight;
                             if (docs[i]['timestamp'] != null) {
@@ -275,7 +282,6 @@ class _HomePageState extends State<HomePage> {
                               ),
                               const SizedBox(height: 25),
 
-                              // Card de Sugestão Ativa (Agora integrado ao que o usuário escreveu no Cardápio)
                               GestureDetector(
                                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DietPage())),
                                 child: Container(
@@ -327,7 +333,13 @@ class _HomePageState extends State<HomePage> {
                                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]),
                                 child: weightSpots.isEmpty ? const Center(child: Text("Registre seu peso!")) : LineChart(LineChartData(
                                   gridData: const FlGridData(show: false),
-                                  titlesData: FlTitlesData(show: true, topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (value, meta) { int index = value.toInt(); if (index >= 0 && index < dates.length) return Padding(padding: const EdgeInsets.only(top: 10), child: Text(dates[index], style: const TextStyle(fontSize: 10, color: Colors.grey))); return const Text(''); }))),
+                                  titlesData: FlTitlesData(
+                                    show: true, 
+                                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), 
+                                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), 
+                                    leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40, getTitlesWidget: (val, meta) => Text(val.toStringAsFixed(1), style: const TextStyle(fontSize: 10, color: Colors.grey)))),
+                                    bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (value, meta) { int index = value.toInt(); if (index >= 0 && index < dates.length) return Padding(padding: const EdgeInsets.only(top: 10), child: Text(dates[index], style: const TextStyle(fontSize: 10, color: Colors.grey))); return const Text(''); }))
+                                  ),
                                   borderData: FlBorderData(show: false),
                                   lineBarsData: [LineChartBarData(spots: weightSpots, isCurved: true, color: primaryBlue, barWidth: 5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: primaryBlue.withOpacity(0.1)))],
                                 )),

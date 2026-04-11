@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/database_service.dart';
 
 class AssessmentPage extends StatefulWidget {
@@ -55,103 +57,41 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
   Future<void> _importPDF() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
-
+      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
       if (result != null) {
         setState(() => _isLoading = true);
         File file = File(result.files.single.path!);
-        
         final PdfDocument document = PdfDocument(inputBytes: file.readAsBytesSync());
         String text = PdfTextExtractor(document).extractText();
         document.dispose();
-
         _smartParse(text);
-
         if (mounted) {
           setState(() => _isLoading = false);
           _isEditing = true;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('PDF analisado com sucesso! Verifique os campos destacados.', textAlign: TextAlign.center),
-              backgroundColor: Colors.teal.shade700,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 4),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dados importados! Verifique e salve para o histórico.'), backgroundColor: Colors.teal));
         }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro na leitura inteligente: $e'), backgroundColor: Colors.redAccent),
-        );
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _smartParse(String rawText) {
-    // Normaliza o texto para facilitar a busca (remove excesso de espaços e padroniza quebras)
     final text = rawText.replaceAll(RegExp(r'\s+'), ' ');
-
-    // Função interna aperfeiçoada com RegExp resiliente
     String? find(List<String> keys) {
       for (var key in keys) {
-        // Busca a palavra-chave seguida opcionalmente de : ou - e captura o número (aceita 96,3 ou 96.3)
         final pattern = RegExp('$key[:\\s\\-]*([\\d+[\\.,]?\\d*)', caseSensitive: false);
         final match = pattern.firstMatch(text);
-        if (match != null && match.group(1) != null) {
-          return match.group(1)!.replaceAll(',', '.'); // Padroniza para ponto decimal
-        }
+        if (match != null && match.group(1) != null) return match.group(1)!.replaceAll(',', '.');
       }
       return null;
     }
-
     setState(() {
-      // Mapeamento com Sinônimos para maior precisão
-      _controllers['Peso']?.text = find(['Peso', 'Massa Corporal', 'Peso Atual']) ?? _controllers['Peso']!.text;
-      _controllers['IMC']?.text = find(['IMC', 'Índice de Massa Corporal']) ?? _controllers['IMC']!.text;
-      _controllers['PGC']?.text = find(['PGC', 'Gordura Corporal', '% Gordura', 'Gordura']) ?? _controllers['PGC']!.text;
-      _controllers['PME']?.text = find(['PME', 'Massa Magra', 'Massa Muscular', '% Muscular']) ?? _controllers['PME']!.text;
-      _controllers['Cintura']?.text = find(['Cintura', 'Circunferência Abdominal']) ?? _controllers['Cintura']!.text;
-      _controllers['Quadril']?.text = find(['Quadril']) ?? _controllers['Quadril']!.text;
-      _controllers['MB']?.text = find(['MB', 'Metabolismo Basal', 'TMB', 'Taxa Metabólica']) ?? _controllers['MB']!.text;
-      _controllers['GV']?.text = find(['GV', 'Gordura Visceral', 'Nível Visceral']) ?? _controllers['GV']!.text;
-      _controllers['IC']?.text = find(['IC', 'Idade Corporal', 'Idade Biológica']) ?? _controllers['IC']!.text;
-      
-      // Pregas Cutâneas
-      _controllers['Abdominal']?.text = find(['Abdominal', 'Pregas Abdominal']) ?? _controllers['Abdominal']!.text;
-      _controllers['Triciptal']?.text = find(['Triciptal', 'Tríceps']) ?? _controllers['Triciptal']!.text;
-      _controllers['Subescapular']?.text = find(['Subescapular']) ?? _controllers['Subescapular']!.text;
+      _controllers['Peso']?.text = find(['Peso', 'Massa Corporal']) ?? _controllers['Peso']!.text;
+      _controllers['IMC']?.text = find(['IMC', 'Índice de Massa']) ?? _controllers['IMC']!.text;
+      _controllers['PGC']?.text = find(['PGC', 'Gordura Corporal', '% Gordura']) ?? _controllers['PGC']!.text;
+      _controllers['PME']?.text = find(['PME', 'Massa Magra', 'Massa Muscular']) ?? _controllers['PME']!.text;
     });
-  }
-
-  Color _getStatusColor(String key, String value) {
-    double? val = double.tryParse(value);
-    if (val == null) return Colors.black87;
-    switch (key) {
-      case 'IMC':
-        if (val < 18.5) return Colors.orange;
-        if (val <= 25.0) return Colors.green.shade700;
-        return Colors.red;
-      case 'PGC':
-        if (val < 8.0) return Colors.orange;
-        if (val <= 19.9) return Colors.green.shade700;
-        return Colors.red;
-      case 'PME':
-        if (val < 33.3) return Colors.orange;
-        if (val <= 39.9) return Colors.green.shade700;
-        return Colors.red;
-      case 'GV':
-        if (val < 5.0) return Colors.orange;
-        if (val <= 9.0) return Colors.green.shade700;
-        return Colors.red;
-      default:
-        return Colors.black87;
-    }
   }
 
   Future<void> _saveData() async {
@@ -164,7 +104,7 @@ class _AssessmentPageState extends State<AssessmentPage> {
         setState(() { _isEditing = false; _isLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Avaliação salva com sucesso!', textAlign: TextAlign.center),
+            content: const Text('Avaliação salva no histórico!', textAlign: TextAlign.center),
             backgroundColor: Colors.teal.shade700,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -172,13 +112,76 @@ class _AssessmentPageState extends State<AssessmentPage> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e', textAlign: TextAlign.center), backgroundColor: Colors.redAccent, behavior: SnackBarBehavior.floating),
-        );
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showEvolutionCharts() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.8,
+        decoration: const BoxDecoration(color: Color(0xFFF0F4F8), borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(10))),
+            const SizedBox(height: 20),
+            const Row(children: [Icon(Icons.auto_graph, color: Colors.blue), SizedBox(width: 10), Text('MINHA EVOLUÇÃO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey))]),
+            const SizedBox(height: 20),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _db.weightHistory,
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma avaliação salva ainda.'));
+                  
+                  final docs = snapshot.data!.docs;
+                  List<FlSpot> weightSpots = [];
+                  List<FlSpot> fatSpots = [];
+                  
+                  for (int i = 0; i < docs.length; i++) {
+                    final data = docs[i].data() as Map<String, dynamic>;
+                    weightSpots.add(FlSpot(i.toDouble(), double.tryParse(data['Peso'].toString()) ?? 0));
+                    fatSpots.add(FlSpot(i.toDouble(), double.tryParse(data['PGC'].toString()) ?? 0));
+                  }
+
+                  return ListView(
+                    children: [
+                      _buildChartCard('Evolução de Peso (kg)', weightSpots, Colors.blue),
+                      const SizedBox(height: 20),
+                      _buildChartCard('Gordura Corporal (%)', fatSpots, Colors.redAccent),
+                      const SizedBox(height: 40),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChartCard(String title, List<FlSpot> spots, Color color) {
+    return Container(
+      height: 250, padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
+          const SizedBox(height: 20),
+          Expanded(child: LineChart(LineChartData(
+            gridData: const FlGridData(show: false),
+            titlesData: const FlTitlesData(show: false),
+            borderData: FlBorderData(show: false),
+            lineBarsData: [LineChartBarData(spots: spots, isCurved: true, color: color, barWidth: 4, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: color.withOpacity(0.1)))],
+          ))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -191,13 +194,19 @@ class _AssessmentPageState extends State<AssessmentPage> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 180.0,
+            expandedHeight: 150.0,
             pinned: true,
             backgroundColor: primaryBlue,
             elevation: 0,
-            leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+            leadingWidth: 100,
+            leading: Row(
+              children: [
+                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+                IconButton(icon: const Icon(Icons.trending_down, color: Colors.white), onPressed: _showEvolutionCharts, tooltip: 'Ver Evolução'),
+              ],
+            ),
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importação Inteligente'),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
               if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
               else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
             ],
@@ -244,16 +253,6 @@ class _AssessmentPageState extends State<AssessmentPage> {
                     _buildModernRow('MB (Metabolismo)', 'MB', suffix: ' kcal'),
                     _buildModernRow('IC (Idade Corporal)', 'IC', suffix: ' anos'),
                     _buildModernRow('GV (Gordura Visceral)', 'GV', suffix: ' nível'),
-                  ]),
-                  const SizedBox(height: 20),
-                  _buildModernSection('PREGAS CUTÂNEAS', Icons.fingerprint, [
-                    _buildModernRow('Triciptal', 'Triciptal', suffix: ' mm'),
-                    _buildModernRow('Subescapular', 'Subescapular', suffix: ' mm'),
-                    _buildModernRow('Axilar média', 'Axilar média', suffix: ' mm'),
-                    _buildModernRow('Suprailíaca', 'Suprailíaca', suffix: ' mm'),
-                    _buildModernRow('Peitoral', 'Peitoral Pregas', suffix: ' mm'),
-                    _buildModernRow('Abdominal', 'Abdominal', suffix: ' mm'),
-                    _buildModernRow('Coxa', 'Coxa Pregas', suffix: ' mm'),
                   ]),
                   const SizedBox(height: 20),
                   _buildIdealValuesCard(),
@@ -315,35 +314,46 @@ class _AssessmentPageState extends State<AssessmentPage> {
   Widget _buildModernSection(String title, IconData icon, List<Widget> children) {
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(children: [Icon(icon, color: Colors.blue, size: 20), const SizedBox(width: 8), Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))]),
-          ),
-          ...children,
-          const SizedBox(height: 8),
-        ],
-      ),
+      child: Column(children: [Padding(padding: const EdgeInsets.all(16), child: Row(children: [Icon(icon, color: Colors.blue, size: 20), const SizedBox(width: 8), Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))])), ...children, const SizedBox(height: 8)]),
     );
   }
 
   Widget _buildModernRow(String label, String key, {required String suffix}) {
     String value = _controllers[key]?.text ?? '';
-    Color statusColor = _getStatusColor(key, value);
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.black54, fontSize: 14)),
-          _isEditing 
-            ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: statusColor), decoration: InputDecoration(suffixText: suffix, isDense: true)))
-            : Text('$value$suffix', style: TextStyle(fontWeight: FontWeight.bold, color: statusColor, fontSize: 15)),
-        ],
-      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(label, style: const TextStyle(color: Colors.black54, fontSize: 14)),
+        _isEditing 
+          ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold), decoration: InputDecoration(suffixText: suffix, isDense: true)))
+          : Text('$value$suffix', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _getStatusColor(key, value))),
+      ]),
     );
+  }
+
+  Color _getStatusColor(String key, String value) {
+    double? val = double.tryParse(value.replaceAll(',', '.'));
+    if (val == null) return Colors.black87;
+    switch (key) {
+      case 'IMC':
+        if (val < 18.5) return Colors.orange;
+        if (val <= 25.0) return Colors.green.shade700;
+        return Colors.red;
+      case 'PGC':
+        if (val < 8.0) return Colors.orange;
+        if (val <= 19.9) return Colors.green.shade700;
+        return Colors.red;
+      case 'PME':
+        if (val < 33.3) return Colors.orange;
+        if (val <= 39.9) return Colors.green.shade700;
+        return Colors.red;
+      case 'GV':
+        if (val < 5.0) return Colors.orange;
+        if (val <= 9.0) return Colors.green.shade700;
+        return Colors.red;
+      default:
+        return Colors.black87;
+    }
   }
 
   Widget _buildIdealValuesCard() {

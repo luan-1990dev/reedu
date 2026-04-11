@@ -12,7 +12,28 @@
           "package_name": "com.luan1990dev.reedu"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1003473714651-4r0l2g3oj6g25aai6qu41vgns1k669j4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.luan1990dev.reedu",
+            "certificate_hash": "7a993efd119036e0f7c112e92d36f5fa082cd994"
+          }
+        },
+        {
+          "client_id": "1003473714651-leen0008gu1drfej10qk6tmulqu306o5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.luan1990dev.reedu",
+            "certificate_hash": "4c971f4a1f5d3a6e55c44442a0e4f6cb2c030495"
+          }
+        },
+        {
+          "client_id": "1003473714651-c6u5limi5mlbquto22v2cu43e3hs6u0e.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB3DVtuT6UkSWHB2BoynTYaWKcn7nz9k2Q"
@@ -20,7 +41,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1003473714651-c6u5limi5mlbquto22v2cu43e3hs6u0e.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
