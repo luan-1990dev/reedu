@@ -1,9 +1,12 @@
 import 'dart:io';
-import 'package:flutter/material.dart';import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
 import '../services/database_service.dart';
+import '../services/auth_service.dart';
 
 class AssessmentPage extends StatefulWidget {
   const AssessmentPage({super.key});
@@ -14,6 +17,7 @@ class AssessmentPage extends StatefulWidget {
 
 class _AssessmentPageState extends State<AssessmentPage> {
   final DatabaseService _db = DatabaseService();
+  final AuthService _auth = AuthService();
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, FocusNode> _focusNodes = {};
 
@@ -25,7 +29,9 @@ class _AssessmentPageState extends State<AssessmentPage> {
     'Peso', 'Braço direito', 'Braço esquerdo', 'Cintura', 'Abdomên',
     'Peitoral', 'Quadril', 'Coxa direita', 'Coxa esquerda',
     'Panturrilha direita', 'Panturrilha esquerda',
-    'IMC', 'PGC', 'PME', 'MB', 'IC', 'GV'
+    'IMC', 'PGC', 'PME', 'MB', 'IC', 'GV',
+    'Tricipital', 'Subescapular', 'Axilar média', 'Supra-ilíaca',
+    'Peitoral (mm)', 'Abdominal (mm)', 'Coxa (mm)'
   ];
 
   @override
@@ -39,33 +45,42 @@ class _AssessmentPageState extends State<AssessmentPage> {
     _loadAllData();
   }
 
+  // Lógica de carregamento corrigida
   Future<void> _loadAllData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
+
     try {
+      // Tenta buscar os dados do perfil e a última avaliação
       final userSnap = await _db.userProfileStream.first;
       final lastEval = await _db.getLatestAssessment();
 
       if (mounted) {
         setState(() {
+          // 1. Carrega dados do Perfil (Nome, Idade, Altura, Meta)
           if (userSnap.exists) {
             final u = userSnap.data() as Map<String, dynamic>;
-            _controllers['NOME']!.text = u['nickname'] ?? u['name'] ?? '';
-            _controllers['IDADE']!.text = u['age']?.toString() ?? '';
-            _controllers['ALTURA']!.text = u['height']?.toString() ?? '';
-            _controllers['PESO META']!.text = u['targetWeight']?.toString() ?? '';
+            _controllers['NOME']!.text = (u['nickname'] ?? u['name'] ?? '').toString();
+            _controllers['IDADE']!.text = (u['age'] ?? '').toString();
+            _controllers['ALTURA']!.text = (u['height'] ?? '').toString();
+            _controllers['PESO META']!.text = (u['targetWeight'] ?? '').toString();
           }
-          if (lastEval != null) {
+
+          // 2. Carrega dados da última avaliação salva (Peso, Medidas, etc)
+          if (lastEval != null && lastEval.exists) {
             final e = lastEval.data() as Map<String, dynamic>;
             for (var f in _fields) {
+              // Só preenche se o campo estiver vazio (prioriza dados do perfil para os 4 primeiros)
               if (e.containsKey(f) && _controllers[f]!.text.isEmpty) {
                 _controllers[f]!.text = e[f].toString();
               }
             }
           }
-          _isLoading = false;
         });
       }
     } catch (e) {
+      debugPrint("ERRO AO CARREGAR AVALIAÇÃO: $e");
+    } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -106,37 +121,72 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
   Future<void> _importPDF() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf']
+      );
       if (result != null) {
         setState(() => _isLoading = true);
         final bytes = File(result.files.single.path!).readAsBytesSync();
         final document = PdfDocument(inputBytes: bytes);
         String text = PdfTextExtractor(document).extractText();
         document.dispose();
+
+        debugPrint("================ TEXTO EXTRAÍDO ================");
+        debugPrint(text);
+        debugPrint("================================================");
+
         _smartParse(text);
         setState(() { _isLoading = false; _isEditing = true; });
       }
-    } catch (e) { setState(() => _isLoading = false); }
+    } catch (e) {
+      debugPrint("Erro no PDF: $e");
+      setState(() => _isLoading = false);
+    }
   }
 
   void _smartParse(String rawText) {
-    final text = rawText.replaceAll(RegExp(r'\s+'), ' ');
-    String? find(List<String> keys) {
+    // Normalização agressiva para ignorar quebras de linha entre rótulo e valor
+    final text = rawText.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r'\s+'), ' ');
+
+    String? findNum(List<String> keys) {
       for (var key in keys) {
-        final pattern = RegExp('$key[:\\s\\-]*([\\d+[\\.,]?\\d*)', caseSensitive: false);
+        final pattern = RegExp('$key' + r'\s*[:\-]*\s*([\d+[\.,]?\d*)', caseSensitive: false);
         final match = pattern.firstMatch(text);
-        if (match != null) return match.group(1)!.replaceAll(',', '.');
+        if (match != null && match.group(1) != null && match.group(1)!.isNotEmpty) {
+          return match.group(1)!.replaceAll(',', '.');
+        }
       }
       return null;
     }
+
+    String? findName() {
+      final pattern = RegExp(r'NOME:\s*(.*?)(?=\s*IDADE:|$)', caseSensitive: false);
+      final match = pattern.firstMatch(text);
+      return match?.group(1)?.trim();
+    }
+
     setState(() {
-      _controllers['Peso']!.text = find(['Peso', 'Massa Corporal']) ?? _controllers['Peso']!.text;
-      _controllers['IDADE']!.text = find(['Idade', 'Anos']) ?? _controllers['IDADE']!.text;
-      _controllers['ALTURA']!.text = find(['Estatura', 'Altura']) ?? _controllers['ALTURA']!.text;
-      _controllers['IMC']!.text = find(['IMC']) ?? _controllers['IMC']!.text;
-      _controllers['PGC']!.text = find(['PGC', 'Gordura']) ?? _controllers['PGC']!.text;
-      _controllers['PME']!.text = find(['PME', 'Massa Magra']) ?? _controllers['PME']!.text;
-      _controllers['GV']!.text = find(['GV', 'Visceral']) ?? _controllers['GV']!.text;
+      _controllers['NOME']!.text = findName() ?? _controllers['NOME']!.text;
+      _controllers['Peso']!.text = findNum(['Peso', 'Massa Corporal', 'Corporal']) ?? _controllers['Peso']!.text;
+      _controllers['IDADE']!.text = findNum(['IDADE', 'Anos', 'Idade']) ?? _controllers['IDADE']!.text;
+      _controllers['ALTURA']!.text = findNum(['ALTURA', 'Estatura', 'Altura']) ?? _controllers['ALTURA']!.text;
+      _controllers['PESO META']!.text = findNum(['PESO META', 'META']) ?? _controllers['PESO META']!.text;
+
+      _controllers['IMC']!.text = findNum(['IMC']) ?? _controllers['IMC']!.text;
+      _controllers['PGC']!.text = findNum(['PGC', 'Gordura']) ?? _controllers['PGC']!.text;
+      _controllers['PME']!.text = findNum(['PME', 'Massa Magra']) ?? _controllers['PME']!.text;
+      _controllers['MB']!.text = findNum(['MB', 'Metabolismo', 'TMB']) ?? _controllers['MB']!.text;
+      _controllers['IC']!.text = findNum(['IC', 'Idade Corporal']) ?? _controllers['IC']!.text;
+      _controllers['GV']!.text = findNum(['GV', 'Visceral']) ?? _controllers['GV']!.text;
+
+      _controllers['Tricipital']!.text = findNum(['Tricipital']) ?? _controllers['Tricipital']!.text;
+      _controllers['Subescapular']!.text = findNum(['Subescapular']) ?? _controllers['Subescapular']!.text;
+      _controllers['Axilar média']!.text = findNum(['Axilar média', 'Axilar']) ?? _controllers['Axilar média']!.text;
+      _controllers['Supra-ilíaca']!.text = findNum(['Supra-ilíaca', 'Supra']) ?? _controllers['Supra-ilíaca']!.text;
+      _controllers['Peitoral (mm)']!.text = findNum(['Peitoral']) ?? _controllers['Peitoral (mm)']!.text;
+      _controllers['Abdominal (mm)']!.text = findNum(['Abdominal']) ?? _controllers['Abdominal (mm)']!.text;
+      _controllers['Coxa (mm)']!.text = findNum(['Coxa']) ?? _controllers['Coxa (mm)']!.text;
     });
   }
 
@@ -146,7 +196,7 @@ class _AssessmentPageState extends State<AssessmentPage> {
     _controllers.forEach((key, controller) => data[key] = controller.text);
     await _db.saveAssessment(data);
     setState(() { _isEditing = false; _isLoading = false; });
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Avaliação salva!'), backgroundColor: Colors.teal));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dados salvos!'), backgroundColor: Colors.teal));
   }
 
   void _showEvolutionCharts() {
@@ -186,16 +236,9 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
                   for (int i = 0; i < docs.length; i++) {
                     final data = docs[i].data() as Map<String, dynamic>;
-                    double w = 0;
-                    if (data.containsKey('Peso')) {
-                      w = double.tryParse(data['Peso'].toString().replaceAll(',', '.')) ?? 0;
-                    }
+                    double w = data.containsKey('Peso') ? (double.tryParse(data['Peso'].toString()) ?? 0) : 0;
+                    double f = data.containsKey('PGC') ? (double.tryParse(data['PGC'].toString()) ?? 0) : 0;
                     weightSpots.add(FlSpot(i.toDouble(), w));
-
-                    double f = 0;
-                    if (data.containsKey('PGC')) {
-                      f = double.tryParse(data['PGC'].toString().replaceAll(',', '.')) ?? 0;
-                    }
                     fatSpots.add(FlSpot(i.toDouble(), f));
                   }
 
@@ -232,6 +275,11 @@ class _AssessmentPageState extends State<AssessmentPage> {
           const SizedBox(height: 15),
           Expanded(
             child: LineChart(LineChartData(
+              lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (spot) => Colors.black.withOpacity(0.8),
+                  )
+              ),
               gridData: const FlGridData(show: false),
               titlesData: const FlTitlesData(show: false),
               borderData: FlBorderData(show: false),
@@ -254,7 +302,6 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
   @override
   Widget build(BuildContext context) {
-    // COR DO BOTÃO E AGORA DO TOPO
     const Color darkBlue = Color(0xFF00008B);
 
     return Scaffold(
@@ -262,9 +309,14 @@ class _AssessmentPageState extends State<AssessmentPage> {
       body: _isLoading ? const Center(child: CircularProgressIndicator()) : CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 160.0,
+            expandedHeight: 180.0,
             pinned: true,
-            backgroundColor: darkBlue, // Alterado para o azul escuro do botão
+            backgroundColor: darkBlue,
+            centerTitle: true,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
             actions: [
               IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF),
               IconButton(
@@ -276,12 +328,17 @@ class _AssessmentPageState extends State<AssessmentPage> {
               background: Container(
                 decoration: const BoxDecoration(
                     gradient: LinearGradient(
-                        colors: [Color(0xFF1A1A9E), darkBlue], // Gradiente combinando com o botão
+                        colors: [Color(0xFF1A1A9E), darkBlue],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter
                     )
                 ),
-                child: Center(child: Padding(padding: const EdgeInsets.only(top: 40), child: _buildHeader())),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 60),
+                    child: _buildHeader(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -290,29 +347,37 @@ class _AssessmentPageState extends State<AssessmentPage> {
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 children: [
-                  _buildEvolutionButton(darkBlue), // Passando a cor para o botão
+                  _buildEvolutionButton(darkBlue),
                   const SizedBox(height: 25),
                   _buildSection('MEDIDAS PERIFÉRICAS', Icons.straighten, [
-                    _buildHighlightedRow('Peso', 'Peso', 'kg'),
-                    _buildHighlightedRow('Braço direito', 'Braço direito', 'cm'),
-                    _buildHighlightedRow('Braço esquerdo', 'Braço esquerdo', 'cm'),
-                    _buildHighlightedRow('Cintura', 'Cintura', 'cm'),
-                    _buildHighlightedRow('Abdomên', 'Abdomên', 'cm'),
-                    _buildHighlightedRow('Peitoral', 'Peitoral', 'cm'),
-                    _buildHighlightedRow('Quadril', 'Quadril', 'cm'),
-                    _buildHighlightedRow('Coxa direita', 'Coxa direita', 'cm'),
-                    _buildHighlightedRow('Coxa esquerda', 'Coxa esquerda', 'cm'),
-                    _buildHighlightedRow('Panturrilha dir.', 'Panturrilha direita', 'cm'),
-                    _buildHighlightedRow('Panturrilha esq.', 'Panturrilha esquerda', 'cm'),
+                    _buildHighlightedRow('Peso', 'Peso', 'kg', 'Seu peso atual'),
+                    _buildHighlightedRow('Braço direito', 'Braço direito', 'cm', 'Circunferência do braço'),
+                    _buildHighlightedRow('Braço esquerdo', 'Braço esquerdo', 'cm', 'Circunferência do braço'),
+                    _buildHighlightedRow('Cintura', 'Cintura', 'cm', 'Medida na altura do umbigo'),
+                    _buildHighlightedRow('Abdomên', 'Abdomên', 'cm', 'Medida abdominal'),
+                    _buildHighlightedRow('Quadril', 'Quadril', 'cm', 'Medida glútea'),
+                    _buildHighlightedRow('Peitoral', 'Peitoral', 'cm', 'Medida do peito'),
+                    _buildHighlightedRow('Coxa direita', 'Coxa direita', 'cm', 'Medida da coxa'),
+                    _buildHighlightedRow('Panturrilha dir.', 'Panturrilha direita', 'cm', 'Medida da panturrilha'),
                   ]),
                   const SizedBox(height: 20),
                   _buildSection('BIOIMPEDÂNCIA', Icons.analytics_outlined, [
-                    _buildHighlightedRow('IMC', 'IMC', 'kg/m²'),
-                    _buildHighlightedRow('PGC (Gordura)', 'PGC', '%'),
-                    _buildHighlightedRow('PME (Massa Magra)', 'PME', '%'),
-                    _buildHighlightedRow('MB (Metabolismo)', 'MB', 'kcal'),
-                    _buildHighlightedRow('IC (Idade Corporal)', 'IC', 'anos'),
-                    _buildHighlightedRow('GV (Gordura Visceral)', 'GV', 'nível'),
+                    _buildHighlightedRow('IMC', 'IMC', 'kg/m²', 'Índice de Massa Corporal'),
+                    _buildHighlightedRow('PGC (Gordura)', 'PGC', '%', 'Gordura Corporal'),
+                    _buildHighlightedRow('PME (Massa Magra)', 'PME', '%', 'Massa Muscular'),
+                    _buildHighlightedRow('MB (Metabolismo)', 'MB', 'kcal', 'Taxa Metabólica'),
+                    _buildHighlightedRow('IC (Idade Corporal)', 'IC', 'anos', 'Idade Biológica'),
+                    _buildHighlightedRow('GV (Gordura Visceral)', 'GV', 'nível', 'Gordura nos Órgãos'),
+                  ]),
+                  const SizedBox(height: 20),
+                  _buildSection('DOBRAS CUTÂNEAS', Icons.layers_outlined, [
+                    _buildHighlightedRow('Tricipital', 'Tricipital', 'mm', 'Dobra do tríceps'),
+                    _buildHighlightedRow('Subescapular', 'Subescapular', 'mm', 'Dobra abaixo da escápula'),
+                    _buildHighlightedRow('Axilar média', 'Axilar média', 'mm', 'Dobra na linha axilar'),
+                    _buildHighlightedRow('Supra-ilíaca', 'Supra-ilíaca', 'mm', 'Dobra acima da crista ilíaca'),
+                    _buildHighlightedRow('Peitoral', 'Peitoral (mm)', 'mm', 'Dobra do peito'),
+                    _buildHighlightedRow('Abdominal', 'Abdominal (mm)', 'mm', 'Dobra do abdômen'),
+                    _buildHighlightedRow('Coxa', 'Coxa (mm)', 'mm', 'Dobra da coxa'),
                   ]),
                   const SizedBox(height: 20),
                   _buildIdealValuesCard(),
@@ -333,16 +398,16 @@ class _AssessmentPageState extends State<AssessmentPage> {
         _isEditing
             ? _headerTextField('NOME')
             : Text(_controllers['NOME']!.text.isEmpty ? "Usuário" : _controllers['NOME']!.text,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-        const SizedBox(height: 15),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _editableChip(Icons.cake, 'IDADE', ' anos', "Idade para metabolismo"),
+            _editableChip(Icons.cake, 'IDADE', ' anos', "Sua idade atual"),
             const SizedBox(width: 8),
-            _editableChip(Icons.height, 'ALTURA', ' m', "Altura em metros"),
+            _editableChip(Icons.height, 'ALTURA', ' m', "Sua altura"),
             const SizedBox(width: 8),
-            _editableChip(Icons.flag, 'PESO META', ' kg', "Meta de peso", prefix: 'Meta: '),
+            _editableChip(Icons.flag, 'PESO META', ' kg', "Seu objetivo", prefix: 'Meta: '),
           ],
         ),
       ],
@@ -356,7 +421,7 @@ class _AssessmentPageState extends State<AssessmentPage> {
         controller: _controllers[key],
         focusNode: _focusNodes[key],
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
         decoration: const InputDecoration(
           enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
           focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white, width: 2)),
@@ -381,53 +446,58 @@ class _AssessmentPageState extends State<AssessmentPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 14),
+            Icon(icon, color: Colors.white, size: 12),
             const SizedBox(width: 5),
             _isEditing
                 ? IntrinsicWidth(child: TextField(
               controller: _controllers[key],
               focusNode: _focusNodes[key],
               keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
               decoration: const InputDecoration(isDense: true, border: InputBorder.none),
             ))
-                : Text('$prefix${_controllers[key]!.text}$suffix', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                : Text('$prefix${_controllers[key]!.text}$suffix', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHighlightedRow(String label, String key, String suffix) {
+  Widget _buildHighlightedRow(String label, String key, String suffix, String tooltip) {
     bool hasFocus = _focusNodes[key]?.hasFocus ?? false;
     String value = _controllers[key]?.text ?? '';
     Color valueColor = _getValueColor(key, value);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: hasFocus ? Colors.blue.withOpacity(0.08) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: hasFocus ? Colors.blue.withOpacity(0.4) : Colors.transparent),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: hasFocus ? Colors.blue.shade700 : Colors.black54, fontWeight: hasFocus ? FontWeight.bold : FontWeight.normal)),
-          SizedBox(
-            width: 100,
-            child: TextField(
-              controller: _controllers[key],
-              focusNode: _focusNodes[key],
-              enabled: _isEditing,
-              textAlign: TextAlign.end,
-              keyboardType: TextInputType.number,
-              style: TextStyle(fontWeight: FontWeight.bold, color: valueColor),
-              decoration: InputDecoration(suffixText: ' $suffix', border: InputBorder.none, isDense: true),
+
+    return Tooltip(
+      message: tooltip,
+      triggerMode: TooltipTriggerMode.tap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: hasFocus ? Colors.blue.withOpacity(0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: hasFocus ? Colors.blue.withOpacity(0.4) : Colors.transparent),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(color: hasFocus ? Colors.blue.shade700 : Colors.black54, fontWeight: hasFocus ? FontWeight.bold : FontWeight.normal)),
+            SizedBox(
+              width: 100,
+              child: TextField(
+                controller: _controllers[key],
+                focusNode: _focusNodes[key],
+                enabled: _isEditing,
+                textAlign: TextAlign.end,
+                keyboardType: TextInputType.number,
+                style: TextStyle(fontWeight: FontWeight.bold, color: valueColor),
+                decoration: InputDecoration(suffixText: ' $suffix', border: InputBorder.none, isDense: true),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -474,7 +544,6 @@ class _AssessmentPageState extends State<AssessmentPage> {
     ]);
   }
 
-  // BOTÃO COM COR darkBlue
   Widget _buildEvolutionButton(Color color) {
     return Container(
       width: double.infinity,

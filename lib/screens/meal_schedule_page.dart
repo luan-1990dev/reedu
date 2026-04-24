@@ -118,7 +118,7 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
             ],
             flexibleSpace: FlexibleSpaceBar(
               centerTitle: true,
-              title: const Text('Agenda de Alarmes', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18)),
+              title: const Text('Agenda de Alarmes', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
               background: Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryColor, Color(0xFF8B0000)]),

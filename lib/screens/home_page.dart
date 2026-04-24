@@ -28,7 +28,7 @@ class _HomePageState extends State<HomePage> {
   final DatabaseService _db = DatabaseService();
   final NotificationService _notifications = NotificationService();
   bool _isUploading = false;
-  double? _lastScheduledTarget; // Para evitar agendamentos redundantes
+  double? _lastScheduledTarget;
 
   @override
   void initState() {
@@ -90,10 +90,8 @@ class _HomePageState extends State<HomePage> {
                     .doc(FirebaseAuth.instance.currentUser?.uid)
                     .set({'waterTarget': val}, SetOptions(merge: true));
 
-                // Dispara o agendamento imediatamente após a edição
                 await _notifications.scheduleWaterReminders(val);
                 _lastScheduledTarget = val;
-
                 if (mounted) Navigator.pop(context);
               }
             },
@@ -212,7 +210,6 @@ class _HomePageState extends State<HomePage> {
                   final nextMeal = _getNextMealInfo(profileData?['meal_schedules'], profileData?['menu']);
                   final double waterTarget = (profileData?['waterTarget'] ?? 4.0).toDouble();
 
-                  // REGRA: Ao carregar os dados, verifica se precisa agendar as notificações
                   if (_lastScheduledTarget != waterTarget) {
                     _lastScheduledTarget = waterTarget;
                     _notifications.scheduleWaterReminders(waterTarget);
@@ -236,7 +233,6 @@ class _HomePageState extends State<HomePage> {
 
                           if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
                             var docs = weightSnap.data!.docs;
-                            // MOSTRAR APENAS DATA DE UMA SEMANA (7 itens)
                             int startIndex = docs.length > 7 ? docs.length - 7 : 0;
                             int chartIndex = 0;
 
@@ -245,7 +241,11 @@ class _HomePageState extends State<HomePage> {
                               weightSpots.add(FlSpot(chartIndex.toDouble(), weight));
 
                               var timestamp = docs[i]['timestamp'] as Timestamp?;
-                              weightDates.add(timestamp != null ? DateFormat('dd/MM').format(timestamp.toDate()) : '');
+                              if (timestamp != null) {
+                                weightDates.add(DateFormat('dd/MM').format(timestamp.toDate()));
+                              } else {
+                                weightDates.add('');
+                              }
                               chartIndex++;
                             }
                           }
@@ -265,7 +265,10 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 10),
                               _buildChecklist(mealChecks),
                               const SizedBox(height: 25),
+
+                              // GRÁFICO MODERNO AQUI
                               _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
+
                               const SizedBox(height: 25),
                               _buildWaterPanel(waterTarget, portionPerSlot, intervals, waterChecks),
                               const SizedBox(height: 40),
@@ -283,6 +286,121 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  // --- MÉTODOS DE UI (GRÁFICO MODERNO) ---
+
+  Widget _buildWeightSection(Color color, List<FlSpot> spots, List<String> dates) {
+    return Column(children: [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        const Text('Tendência Semanal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TextButton(
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeightMonthlyPage())),
+          child: const Text('VER MÊS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+        ),
+        IconButton(
+          onPressed: () {
+            final String today = DateFormat('dd/MM').format(DateTime.now());
+            if (dates.contains(today)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Você já registrou seu peso hoje!'), backgroundColor: Colors.orange, behavior: SnackBarBehavior.floating),
+              );
+            } else {
+              _showAddWeightDialog();
+            }
+          },
+          icon: const Icon(Icons.add_chart, color: Colors.black54, size: 22),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Container(
+        height: 220, // Um pouco mais alto para o visual clean
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(25),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 15)]
+        ),
+        padding: const EdgeInsets.fromLTRB(5, 25, 20, 10),
+        child: spots.isEmpty
+            ? const Center(child: Text("Sem dados"))
+            : LineChart(LineChartData(
+          lineTouchData: LineTouchData(
+            enabled: true,
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipColor: (spot) => Colors.black.withOpacity(0.8),
+              getTooltipItems: (touchedSpots) => touchedSpots.map((spot) {
+                return LineTooltipItem(
+                  '${spot.y.toStringAsFixed(1)} kg\n${dates[spot.x.toInt()]}',
+                  const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                );
+              }).toList(),
+            ),
+          ),
+          gridData: const FlGridData(show: false), // Remove as linhas de grade para ficar moderno
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                interval: 1,
+                reservedSize: 30,
+                getTitlesWidget: (value, meta) {
+                  if (value % 1 != 0) return const SizedBox();
+                  int index = value.toInt();
+                  if (index >= 0 && index < dates.length) {
+                    return SideTitleWidget(
+                      meta: meta,
+                      space: 10,
+                      child: Text(dates[index], style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
+                    );
+                  }
+                  return const SizedBox();
+                },
+              ),
+            ),
+          ),
+          borderData: FlBorderData(show: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              curveSmoothness: 0.35,
+              color: Colors.black, // Linha principal preta
+              barWidth: 4,
+              isStrokeCapRound: true,
+              dotData: FlDotData(
+                show: true,
+                getDotPainter: (spot, percent, barData, index) {
+                  Color dotColor = Colors.yellow;
+                  if (index > 0) {
+                    double prevY = barData.spots[index - 1].y;
+                    if (spot.y > prevY) dotColor = Colors.red;
+                    if (spot.y < prevY) dotColor = Colors.lightGreen;
+                  }
+                  return FlDotCirclePainter(radius: 5, color: dotColor, strokeWidth: 2, strokeColor: Colors.white);
+                },
+              ),
+              // EFEITO MODERNO: Gradiente abaixo da linha
+              belowBarData: BarAreaData(
+                show: true,
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withOpacity(0.1),
+                    Colors.black.withOpacity(0.0),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            )
+          ],
+        )),
+      ),
+    ]);
+  }
+
+  // --- MANTENDO OS OUTROS MÉTODOS AUXILIARES ---
 
   Widget _buildWaterPanel(double waterTarget, String portionPerSlot, List<String> intervals, Map waterChecks) {
     const Color waterBlue = Color(0xFF0288D1);
@@ -303,14 +421,11 @@ class _HomePageState extends State<HomePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.water_drop, color: Colors.white, size: 20),
-                  const SizedBox(width: 10),
-                  Text('METAS DE ÁGUA (${waterTarget.toStringAsFixed(1)}L)',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                ],
-              ),
+              Row(children: [
+                const Icon(Icons.water_drop, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Text('METAS DE ÁGUA (${waterTarget.toStringAsFixed(1)}L)', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+              ]),
               GestureDetector(
                 onTap: () => _showEditDailyWaterGoalDialog(waterTarget),
                 child: const Icon(Icons.edit, color: Colors.white70, size: 20),
@@ -333,91 +448,12 @@ class _HomePageState extends State<HomePage> {
           Text(time, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
           GestureDetector(
             onTap: () => _db.toggleWaterSlot(time, !isChecked),
-            child: Icon(
-                isChecked ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: Colors.white,
-                size: 26
-            ),
+            child: Icon(isChecked ? Icons.check_circle : Icons.radio_button_unchecked, color: Colors.white, size: 26),
           ),
           Text(amount, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
         ],
       ),
     );
-  }
-
-  Widget _buildWeightSection(Color color, List<FlSpot> spots, List<String> dates) {
-    return Column(children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        const Text('Tendência Semanal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        TextButton(
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeightMonthlyPage())),
-          child: const Text('VER MÊS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-        ),
-        IconButton(onPressed: _showAddWeightDialog, icon: const Icon(Icons.add_chart, color: Colors.black54, size: 22)),
-      ]),
-      const SizedBox(height: 10),
-      Container(
-        height: 200,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-        padding: const EdgeInsets.fromLTRB(10, 20, 20, 10),
-        child: spots.isEmpty
-            ? const Center(child: Text("Sem dados"))
-            : LineChart(LineChartData(
-          lineTouchData: LineTouchData(
-            enabled: true,
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipColor: (spot) => Colors.black.withOpacity(0.8),
-              getTooltipItems: (touchedSpots) => touchedSpots.map((spot) {
-                return LineTooltipItem(
-                  '${spot.y.toStringAsFixed(1)} kg\n${dates[spot.x.toInt()]}',
-                  const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                );
-              }).toList(),
-            ),
-          ),
-          gridData: const FlGridData(show: false),
-          titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  int index = value.toInt();
-                  if (index >= 0 && index < dates.length) {
-                    return Text(dates[index], style: const TextStyle(fontSize: 9, color: Colors.grey));
-                  }
-                  return const SizedBox();
-                },
-              ),
-            ),
-          ),
-          borderData: FlBorderData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: spots,
-              isCurved: true,
-              color: Colors.black,
-              barWidth: 3,
-              dotData: FlDotData(
-                show: true,
-                getDotPainter: (spot, percent, barData, index) {
-                  Color dotColor = Colors.yellow;
-                  if (index > 0) {
-                    double prevY = barData.spots[index - 1].y;
-                    if (spot.y > prevY) dotColor = Colors.red;
-                    if (spot.y < prevY) dotColor = Colors.lightGreen;
-                  }
-                  return FlDotCirclePainter(radius: 4, color: dotColor, strokeWidth: 1.5, strokeColor: Colors.black26);
-                },
-              ),
-              belowBarData: BarAreaData(show: true, color: Colors.black.withOpacity(0.02)),
-            )
-          ],
-        )),
-      ),
-    ]);
   }
 
   Widget _buildDietHeader(BuildContext context, Color color) {
@@ -441,7 +477,7 @@ class _HomePageState extends State<HomePage> {
       _buildHeaderIcon(icon: Icons.restaurant_menu, color: Colors.green, label: 'Cardápio', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuPage()))),
       _buildHeaderIcon(icon: Icons.medication, color: Colors.purple, label: 'Suplementos', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupplementationPage()))),
       _buildHeaderIcon(icon: Icons.kitchen, color: Colors.orange, label: 'Receitas', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipesPage()))),
-      _buildHeaderIcon(icon: Icons.alarm, color: Colors.teal, label: 'Alarmes', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MealSchedulePage()))),
+      _buildHeaderIcon(icon: Icons.alarm, color: Colors.redAccent, label: 'Alarmes', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MealSchedulePage()))),
       _buildHeaderIcon(icon: Icons.bar_chart, color: Colors.blue, label: 'Avaliação', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssessmentPage()))),
     ]);
   }

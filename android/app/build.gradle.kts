@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import kotlin.io.path.exists
 
 plugins {
     id("com.android.application")
@@ -16,7 +17,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.luan1990dev.reedu"
-    compileSdk = 36
+    // Compile SDK 35 é o padrão estável atual para Android 15
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -46,11 +48,13 @@ android {
 
     defaultConfig {
         applicationId = "com.luan1990dev.reedu"
-        minSdk = flutter.minSdkVersion
+        // Definido manualmente para 21 para evitar erros de plugins
+        minSdk = 21
         targetSdk = 35
-        // Atualizado para v13 para sincronizar com pubspec.yaml
-        versionCode = 13
-        versionName = "1.0.2"
+
+        // versionCode 14 para evitar erro de versão duplicada no Firebase/Play Store
+        versionCode = 14
+        versionName = "1.0.3"
     }
 
     buildTypes {

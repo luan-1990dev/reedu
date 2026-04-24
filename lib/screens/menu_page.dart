@@ -28,36 +28,43 @@ class _MenuPageState extends State<MenuPage> {
     'Observações': TextEditingController(),
   };
 
+  final List<String> _mealOrder = [
+    'Café da Manhã',
+    'Lanche da Manhã',
+    'Almoço',
+    'Lanche da Tarde 1',
+    'Lanche da Tarde 2',
+    'Jantar'
+  ];
+
   final Map<String, List<String>> _mealOptions = {
     'Café da Manhã': [
-      'Opção 1: 1 pão francês s/ miolo + 3 ovos mexidos + café + fruta',
-      'Opção 2: 2 fatias pão integral + 3 ovos mexidos + café + fruta',
-      'Opção 3: 1 pão francês s/ miolo + 70g frango desfiado + café + fruta',
-      'Opção 4: 1 crepioca (30g goma + 3 ovos) + 15g requeijão light + café + fruta',
+      '1 pão francês s/ miolo + 3 ovos mexidos + café + fruta',
+      '2 fatias pão integral + 3 ovos mexidos + café + fruta',
+      '1 pão francês s/ miolo + 70g frango desfiado + café + fruta',
+      '1 crepioca (30g goma + 3 ovos) + 15g requeijão light + café + fruta',
     ],
     'Lanche da Manhã': [
-      'Opção 1: 30g de whey protein isolado + 200ml de água + 1 banana nanica',
-      'Opção 2: 1 pote de iogurte natural integral (170g) + 1 banana nanica',
+      '30g de whey protein isolado + 200ml de água + 1 banana nanica',
+      '1 pote de iogurte natural integral (170g) + 1 banana nanica',
     ],
     'Almoço': [
-      'Opção 1: Arroz (120g) + Feijão (90g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-      'Opção 2: Macarrão Integral (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-      'Opção 3: Batata Doce (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
-      'Opção 4: Mandioca (120g) + Carne Magra (140g) + Vegetais A e B + Sobremesa',
+      'Arroz (120g) + Feijão (90g) + Carne Magra (140g) + Vegetais',
+      'Macarrão Integral (120g) + Carne Magra (140g) + Vegetais',
+      'Batata Doce (120g) + Carne Magra (140g) + Vegetais',
+      'Mandioca (120g) + Carne Magra (140g) + Vegetais',
     ],
     'Lanche da Tarde 1': [
-      'Opção 1: 1 porção de fruta (maçã, pêra ou goiaba)',
+      '1 porção de fruta (maçã, pêra ou goiaba)',
     ],
     'Lanche da Tarde 2': [
-      'Opção 1: 1 pão francês s/ miolo + 1 ovo mexido + café',
-      'Opção 2: 2 fatias pão integral + 1 ovo mexido + café',
-      'Opção 3: 2 fatias pão integral + 15g requeijão light + café',
-      'Opção 4: 1 pão francês s/ miolo + 30g patê frango/atum + café',
-      'Opção 5: 2 fatias pão integral + 10g pasta amendoim + café',
+      '1 pão francês s/ miolo + 1 ovo mexido + café',
+      '2 fatias pão integral + 1 ovo mexido + café',
+      '2 fatias pão integral + 15g requeijão light + café',
     ],
     'Jantar': [
-      'Opção 1: Arroz (100g) + Feijão (60g) + Proteína (140g) + Vegetais A e B + Sobremesa',
-      'Opção 2: Batata Doce (100g) + Proteína (140g) + Vegetais A e B + Sobremesa',
+      'Arroz (100g) + Feijão (60g) + Proteína (140g) + Vegetais',
+      'Batata Doce (100g) + Proteína (140g) + Vegetais',
     ],
   };
 
@@ -68,11 +75,12 @@ class _MenuPageState extends State<MenuPage> {
   }
 
   Future<void> _loadMenuData() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (doc.exists && doc.data()!.containsKey('menu')) {
-        final Map<String, dynamic> saved = doc.data()!['menu'];
+    setState(() => _isLoading = true);
+    final userSnap = await _db.userProfileStream.first;
+    if (userSnap.exists) {
+      final data = userSnap.data() as Map<String, dynamic>;
+      final Map<String, dynamic>? saved = data['menu'];
+      if (saved != null) {
         setState(() {
           saved.forEach((key, value) {
             if (_controllers.containsKey(key)) {
@@ -82,111 +90,106 @@ class _MenuPageState extends State<MenuPage> {
         });
       }
     }
+    setState(() => _isLoading = false);
   }
 
-  @override
-  void dispose() {
-    _controllers.values.forEach((c) => c.dispose());
-    super.dispose();
+  Future<void> _importPDF() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (result != null) {
+        setState(() => _isLoading = true);
+        final bytes = File(result.files.single.path!).readAsBytesSync();
+        final document = PdfDocument(inputBytes: bytes);
+        String text = PdfTextExtractor(document).extractText();
+        document.dispose();
+        _smartParseMenu(text);
+        setState(() { _isLoading = false; _isEditing = true; });
+      }
+    } catch (e) { setState(() => _isLoading = false); }
+  }
+
+  void _smartParseMenu(String rawText) {
+    final text = rawText.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r'\s+'), ' ');
+    setState(() {
+      for (var meal in _mealOrder) {
+        final pattern = RegExp('$meal' + r'[:\-]*\s*(.*?)(?=' + _mealOrder.join('|') + r'|OBS:|$)', caseSensitive: false);
+        final match = pattern.firstMatch(text);
+        if (match != null) {
+          _controllers[meal]!.text = match.group(1)!.trim();
+        }
+      }
+    });
   }
 
   Future<void> _saveData() async {
     setState(() => _isLoading = true);
     Map<String, String> data = {};
     _controllers.forEach((key, controller) => data[key] = controller.text);
-    try {
-      await _db.saveMenu(data);
-      if (mounted) {
-        setState(() { _isEditing = false; _isLoading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Cardápio salvo com sucesso!', textAlign: TextAlign.center),
-            backgroundColor: Colors.teal.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    await _db.saveMenu(data);
+    setState(() { _isEditing = false; _isLoading = false; });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cardápio atualizado!'), backgroundColor: Colors.green));
   }
 
+  // --- ALTERADO: DIÁLOGO NO MEIO DA TELA E CORREÇÃO DE OVERFLOW ---
   void _showStatsDialog() {
     showDialog(
       context: context,
       builder: (context) => Center(
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.85,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE3F2FD),
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20)],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
+        child: SingleChildScrollView( // Evita overflow vertical em telas pequenas
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            title: Row(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.analytics, color: Colors.blue.shade700),
-                        const SizedBox(width: 12),
-                        const Text('MAIS CONSUMIDOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1967D2))),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 22),
-                      onPressed: () async {
-                        await _db.clearMenuStats();
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                    ),
-                  ],
-                ),
-                const Divider(height: 30),
-                StreamBuilder<QuerySnapshot>(
-                  stream: _db.topMenuOptions,
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(child: Padding(padding: EdgeInsets.all(20), child: Text("Nenhum dado registrado.")));
-                    }
-                    return ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: snapshot.data!.docs.length,
-                      itemBuilder: (context, index) {
-                        final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(child: Text('${data['mealType']}: ${snapshot.data!.docs[index].id.split(':')[0]}', style: const TextStyle(fontSize: 13))),
-                              Text('${data['count']}x', style: const TextStyle(fontSize: 14, color: Colors.blue, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
-                    child: const Text('FECHAR'),
+                const Icon(Icons.analytics_outlined, color: Colors.blue),
+                const SizedBox(width: 10),
+                const Expanded( // CORREÇÃO DE OVERFLOW NO TÍTULO
+                  child: Text(
+                    'MAIS CONSUMIDOS',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep, color: Colors.red, size: 22),
+                  onPressed: () async {
+                    await _db.clearMenuStats();
+                    if (context.mounted) Navigator.pop(context);
+                  },
                 ),
               ],
             ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _db.topMenuOptions,
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  var docs = snapshot.data!.docs;
+                  if (docs.isEmpty) return const Text("Nenhum dado coletado da Home ainda.");
+
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: docs.length,
+                    itemBuilder: (context, index) {
+                      var data = docs[index].data() as Map<String, dynamic>;
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          radius: 15,
+                          backgroundColor: Colors.blue.shade50,
+                          child: Text("${data['count']}x", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                        ),
+                        title: Text(data['option'], style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(data['mealType'], style: const TextStyle(fontSize: 10)),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("FECHAR")),
+            ],
           ),
         ),
       ),
@@ -196,30 +199,25 @@ class _MenuPageState extends State<MenuPage> {
   @override
   Widget build(BuildContext context) {
     const Color primaryGreen = Color(0xFF2E7D32);
-    const Color bgSoft = Color(0xFFF0F4F8);
 
     return Scaffold(
-      backgroundColor: bgSoft,
-      body: CustomScrollView(
+      backgroundColor: const Color(0xFFF1F5F9),
+      body: _isLoading ? const Center(child: CircularProgressIndicator()) : CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 120.0, pinned: true, backgroundColor: primaryGreen, elevation: 0,
-            leadingWidth: 100,
-            leading: Row(
-              children: [
-                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
-                IconButton(icon: const Icon(Icons.analytics_outlined, color: Colors.white), onPressed: _showStatsDialog, tooltip: 'Estatísticas'),
-              ],
-            ),
+            expandedHeight: 120.0, pinned: true, backgroundColor: primaryGreen,
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: () {}, tooltip: 'Importar PDF'),
-              if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
-              else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
+              IconButton(icon: const Icon(Icons.analytics_outlined), onPressed: _showStatsDialog),
+              IconButton(icon: const Icon(Icons.picture_as_pdf), onPressed: _importPDF),
+              IconButton(
+                icon: Icon(_isEditing ? Icons.check : Icons.edit, color: Colors.white),
+                onPressed: () => _isEditing ? _saveData() : setState(() => _isEditing = true),
+              ),
             ],
             flexibleSpace: FlexibleSpaceBar(
               centerTitle: true,
-              title: const Text('Meu Cardápio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-              background: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryGreen, Color(0xFF4CAF50)]))),
+              title: const Text('Meu Cardápio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              background: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [primaryGreen, Color(0xFF4CAF50)], begin: Alignment.topCenter, end: Alignment.bottomCenter))),
             ),
           ),
           SliverToBoxAdapter(
@@ -227,10 +225,8 @@ class _MenuPageState extends State<MenuPage> {
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  ..._controllers.keys.map((key) {
-                    if (key == 'Observações') return _buildMenuCard(key, primaryGreen);
-                    return _buildDropdownSection(key, _mealOptions[key] ?? [], _getIconForKey(key), primaryGreen);
-                  }).toList(),
+                  ..._mealOrder.map((meal) => _buildMealCard(meal, primaryGreen)),
+                  _buildMenuCard('Observações', primaryGreen),
                 ],
               ),
             ),
@@ -240,73 +236,66 @@ class _MenuPageState extends State<MenuPage> {
     );
   }
 
-  IconData _getIconForKey(String key) {
-    switch (key) {
-      case 'Café da Manhã': return Icons.wb_sunny_outlined;
-      case 'Lanche da Manhã': return Icons.wb_twilight;
-      case 'Almoço': return Icons.restaurant;
-      case 'Lanche da Tarde 1': return Icons.apple;
-      case 'Lanche da Tarde 2': return Icons.coffee;
-      case 'Jantar': return Icons.nightlight_round;
-      default: return Icons.restaurant_menu;
-    }
-  }
-
-  Widget _buildDropdownSection(String key, List<String> options, IconData icon, Color themeColor) {
+  Widget _buildMealCard(String title, Color themeColor) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: themeColor.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: themeColor, size: 20)),
-                const SizedBox(width: 12),
-                Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey)),
+                Icon(Icons.restaurant_menu, color: themeColor.withOpacity(0.7), size: 20),
+                const SizedBox(width: 10),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF374151))),
               ],
             ),
-          ),
-          if (_isEditing)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
+            const SizedBox(height: 15),
+            if (_isEditing)
+              Column(
                 children: [
                   DropdownButtonFormField<String>(
-                    isExpanded: true, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Modelo sugerido'),
-                    items: options.map((opt) => DropdownMenuItem(value: opt, child: Text(opt, style: const TextStyle(fontSize: 11)))).toList(),
-                    onChanged: (val) { if (val != null) setState(() => _controllers[key]!.text = val); },
+                    isExpanded: true,
+                    decoration: InputDecoration(filled: true, fillColor: Colors.blue.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none), labelText: 'Modelo Sugerido'),
+                    items: (_mealOptions[title] ?? []).map((opt) => DropdownMenuItem(value: opt, child: Text(opt, style: const TextStyle(fontSize: 11)))).toList(),
+                    onChanged: (val) { if (val != null) setState(() => _controllers[title]!.text = val); },
                   ),
-                  const SizedBox(height: 12),
-                  TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none), labelText: 'Sua receita personalizada')),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _controllers[title],
+                    maxLines: null,
+                    decoration: InputDecoration(filled: true, fillColor: Colors.blue.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none), hintText: "Personalize aqui..."),
+                  ),
+                ],
+              )
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _controllers[title]!.text.isEmpty ? "Nenhum plano definido." : _controllers[title]!.text,
+                    style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.w600, height: 1.4),
+                  ),
+                  const Divider(height: 30),
+                  const Text('OPÇÕES DO PLANO:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.1)),
+                  const SizedBox(height: 10),
+                  ...(_mealOptions[title] ?? []).map((opt) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 14, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black54))),
+                      ],
+                    ),
+                  )).toList(),
                 ],
               ),
-            )
-          else
-            Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Align(alignment: Alignment.centerLeft, child: Text(_controllers[key]!.text.isEmpty ? 'Nenhum plano definido.' : _controllers[key]!.text, style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.4))),
-                ),
-                const Divider(),
-                ...options.map((opt) => CheckboxListTile(
-                  title: Text(opt, style: const TextStyle(fontSize: 13, color: Colors.black87)),
-                  value: false, activeColor: themeColor, controlAffinity: ListTileControlAffinity.trailing,
-                  onChanged: (val) async {
-                    if (val == true) {
-                      await _db.logMenuOptionConsumption(key, opt);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Consumo de "${opt.split(':')[0]}" registrado!'), backgroundColor: Colors.teal.shade700, behavior: SnackBarBehavior.floating));
-                    }
-                  },
-                )).toList(),
-              ],
-            ),
-          if (key == 'Café da Manhã')
-            Padding(padding: const EdgeInsets.all(16.0), child: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), child: const Row(children: [Icon(Icons.info_outline, color: Colors.redAccent, size: 18), SizedBox(width: 8), Expanded(child: Text('OBS: Tomar 6g de creatina após o café.', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent)))]))),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -314,16 +303,16 @@ class _MenuPageState extends State<MenuPage> {
   Widget _buildMenuCard(String key, Color themeColor) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [Icon(key == 'Observações' ? Icons.note_alt_outlined : Icons.restaurant_menu, color: themeColor, size: 20), const SizedBox(width: 10), Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey))]),
+            Row(children: [Icon(Icons.note_alt_outlined, color: themeColor, size: 20), const SizedBox(width: 10), Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey))]),
             const SizedBox(height: 12),
             _isEditing
-                ? TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.grey.shade50, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)))
+                ? TextField(controller: _controllers[key], maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.blue.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)))
                 : Text(_controllers[key]!.text.isEmpty ? 'Nenhuma informação cadastrada.' : _controllers[key]!.text, style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.black54)),
           ],
         ),
