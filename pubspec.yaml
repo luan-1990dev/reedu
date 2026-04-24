@@ -2,7 +2,7 @@ name: reedu
 description: "Reedu - Reeducação Alimentar Inteligente"
 publish_to: 'none'
 
-version: 1.0.1+14
+version: 1.0.4+16
 
 environment:
   sdk: ^3.10.4

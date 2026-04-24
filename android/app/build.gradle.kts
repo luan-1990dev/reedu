@@ -18,7 +18,7 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.luan1990dev.reedu"
     // Compile SDK 35 é o padrão estável atual para Android 15
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -49,12 +49,12 @@ android {
     defaultConfig {
         applicationId = "com.luan1990dev.reedu"
         // Definido manualmente para 21 para evitar erros de plugins
-        minSdk = 21
-        targetSdk = 35
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
 
         // versionCode 14 para evitar erro de versão duplicada no Firebase/Play Store
-        versionCode = 14
-        versionName = "1.0.3"
+        versionCode = 16
+        versionName = "1.0.4"
     }
 
     buildTypes {

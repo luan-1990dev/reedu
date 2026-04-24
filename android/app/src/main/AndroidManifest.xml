@@ -29,7 +29,7 @@
     <!-- Correção: Alterado ${applicationName} para io.flutter.app.FlutterApplication para melhor compatibilidade -->
     <application
         android:label="Reedu"
-        android:name="io.flutter.app.FlutterApplication"
+        android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
         android:requestLegacyExternalStorage="true">
 
