@@ -15,6 +15,7 @@ import 'supplementation_page.dart';
 import 'meal_schedule_page.dart';
 import 'menu_page.dart';
 import 'diet_page.dart';
+import 'weight_monthly_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,34 +28,108 @@ class _HomePageState extends State<HomePage> {
   final DatabaseService _db = DatabaseService();
   final NotificationService _notifications = NotificationService();
   bool _isUploading = false;
+  double? _lastScheduledTarget; // Para evitar agendamentos redundantes
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _initNotifications();
+  }
+
+  Future<void> _initNotifications() async {
+    await _notifications.initNotification();
+    if (mounted) {
       _notifications.requestAllPermissions(context);
-    });
+    }
+  }
+
+  String _getDisplayName(Map<String, dynamic>? profileData) {
+    if (profileData?['nickname'] != null && profileData!['nickname'].toString().isNotEmpty) {
+      return profileData['nickname'];
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.email != null) {
+      String namePart = user!.email!.split('@')[0];
+      String rawName = namePart.split(RegExp(r'[._-]'))[0];
+      return rawName[0].toUpperCase() + rawName.substring(1).toLowerCase();
+    }
+    return "Usuário";
   }
 
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
-    
+
     if (image != null) {
       setState(() => _isUploading = true);
-      await _db.updateProfilePicture(image.path); 
-      if (mounted) {
-        setState(() => _isUploading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Foto de perfil atualizada!', textAlign: TextAlign.center),
-            backgroundColor: Colors.teal.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          )
-        );
-      }
+      await _db.updateProfilePicture(image.path);
+      if (mounted) setState(() => _isUploading = false);
     }
+  }
+
+  void _showEditDailyWaterGoalDialog(double currentTarget) {
+    final controller = TextEditingController(text: currentTarget.toStringAsFixed(1));
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Meta Diária de Água'),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(suffixText: "Litros", hintText: "Ex: 4.5"),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                final val = double.tryParse(controller.text.replaceAll(',', '.')) ?? 4.0;
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(FirebaseAuth.instance.currentUser?.uid)
+                    .set({'waterTarget': val}, SetOptions(merge: true));
+
+                // Dispara o agendamento imediatamente após a edição
+                await _notifications.scheduleWaterReminders(val);
+                _lastScheduledTarget = val;
+
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text('SALVAR'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddWeightDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Registrar Peso Atual'),
+        content: TextField(
+            controller: controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(hintText: "Ex: 95.5", suffixText: "kg"),
+            autofocus: true
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
+          ElevatedButton(
+              onPressed: () async {
+                if (controller.text.isNotEmpty) {
+                  await _db.saveAssessment({'Peso': controller.text.trim()});
+                  if (mounted) Navigator.pop(context);
+                }
+              },
+              child: const Text('SALVAR')
+          ),
+        ],
+      ),
+    );
   }
 
   Map<String, dynamic> _getNextMealInfo(List<dynamic>? customSchedules, Map<String, dynamic>? customMenu) {
@@ -85,281 +160,123 @@ class _HomePageState extends State<HomePage> {
         }
       }
     }
-    
-    final hour = now.hour;
-    if (hour < 9) return {'title': 'Café da Manhã', 'time': '05:30', 'options': getOptions('Café da Manhã'), 'key': 'cafe'};
-    if (hour < 12) return {'title': 'Lanche da Manhã', 'time': '09:00', 'options': getOptions('Lanche da Manhã'), 'key': 'lanche_m'};
-    if (hour < 15) return {'title': 'Almoço', 'time': '12:30', 'options': getOptions('Almoço'), 'key': 'almoco'};
-    if (hour < 18) return {'title': 'Lanche da Tarde 1', 'time': '16:00', 'options': getOptions('Lanche da Tarde 1'), 'key': 'lanche_t1'};
-    if (hour < 20) return {'title': 'Lanche da Tarde 2', 'time': '18:00', 'options': getOptions('Lanche da Tarde 2'), 'key': 'lanche_t2'};
-    return {'title': 'Jantar', 'time': '20:00', 'options': getOptions('Jantar'), 'key': 'jantar'};
-  }
-
-  void _showAddWeightDialog(BuildContext context, DatabaseService db) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Peso Atual'),
-        content: TextField(controller: controller, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(hintText: "Ex: 95.5", suffixText: "kg"), autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-          ElevatedButton(onPressed: () async {
-            if (controller.text.isNotEmpty) { await db.saveAssessment({'Peso': controller.text.trim()}); if (context.mounted) Navigator.pop(context); }
-          }, child: const Text('SALVAR')),
-        ],
-      ),
-    );
-  }
-
-  void _showEditWaterDialog(BuildContext context, DatabaseService db, double current) {
-    final controller = TextEditingController(text: current.toStringAsFixed(1));
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Editar Total de Água'),
-        content: TextField(controller: controller, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(hintText: "Ex: 2.5", suffixText: "L"), autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-          ElevatedButton(onPressed: () async {
-            final val = double.tryParse(controller.text.replaceAll(',', '.')) ?? 0.0;
-            await db.setWaterTotal(val);
-            if (context.mounted) Navigator.pop(context);
-          }, child: const Text('SALVAR')),
-        ],
-      ),
-    );
-  }
-
-  void _showEditNameDialog(BuildContext context, String currentName, DatabaseService db) {
-    final controller = TextEditingController(text: currentName);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Como quer ser chamado?'),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "Apelido"), autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.trim().isNotEmpty) {
-                await FirebaseFirestore.instance.collection('users').doc(FirebaseAuth.instance.currentUser?.uid).update({'nickname': controller.text.trim()});
-                if (context.mounted) Navigator.pop(context);
-              }
-            },
-            child: const Text('SALVAR'),
-          ),
-        ],
-      ),
-    );
+    return {'title': 'Café da Manhã', 'time': '05:30', 'options': getOptions('Café da Manhã'), 'key': 'cafe'};
   }
 
   @override
   Widget build(BuildContext context) {
-    final authService = AuthService();
-    const Color primaryBlue = Color(0xFF1967D2);
-    const Color backgroundColor = Color(0xFFF0F4F8);
+    const Color primaryOceanGreen = Color(0xFF00695C);
+    const Color bgLight = Color(0xFFF8FAFC);
 
     return Scaffold(
-      backgroundColor: backgroundColor,
+      backgroundColor: bgLight,
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         slivers: [
           SliverAppBar(
-            expandedHeight: 100.0,
+            expandedHeight: 150.0,
             floating: false,
-            pinned: true,
-            backgroundColor: primaryBlue,
+            pinned: false,
+            backgroundColor: Colors.transparent,
             elevation: 0,
             actions: [
-              IconButton(icon: const Icon(Icons.exit_to_app, color: Colors.white, size: 24), onPressed: () async => await authService.signOut(), tooltip: 'Sair'),
-              const SizedBox(width: 8),
+              IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.redAccent),
+                  onPressed: () => AuthService().signOut()
+              ),
             ],
             flexibleSpace: FlexibleSpaceBar(
-              centerTitle: true,
-              title: Image.asset('assets/icon/app_icon.png', height: 40, errorBuilder: (_, __, ___) => const Text('Reedu', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryBlue, Color(0xFF4285F4)]),
+              collapseMode: CollapseMode.parallax,
+              background: Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 40),
+                  child: Image.asset(
+                    'assets/icon/app_icon.home.png',
+                    height: 100,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Text('REEDU', style: TextStyle(color: primaryOceanGreen, fontWeight: FontWeight.bold, fontSize: 32)),
+                  ),
                 ),
               ),
             ),
           ),
           SliverToBoxAdapter(
-            child: StreamBuilder<DocumentSnapshot>(
-              stream: _db.userProfileStream,
-              builder: (context, profileSnap) {
-                final profileData = profileSnap.data?.data() as Map<String, dynamic>?;
-                String fullName = profileData?['nickname'] ?? profileData?['name'] ?? FirebaseAuth.instance.currentUser?.displayName ?? 'Usuário';
-                String firstName = fullName.split(' ')[0];
-                String? photoUrl = profileData?['photoUrl'];
-                final List<dynamic>? schedules = profileData?['meal_schedules'];
-                final Map<String, dynamic>? customMenu = profileData?['menu'];
-                final nextMeal = _getNextMealInfo(schedules, customMenu);
-                final waterTarget = (profileData?['waterTarget'] ?? 4.0) as double;
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: StreamBuilder<DocumentSnapshot>(
+                stream: _db.userProfileStream,
+                builder: (context, profileSnap) {
+                  final profileData = profileSnap.data?.data() as Map<String, dynamic>?;
+                  final String displayName = _getDisplayName(profileData);
+                  String? photoUrl = profileData?['photoUrl'];
+                  final nextMeal = _getNextMealInfo(profileData?['meal_schedules'], profileData?['menu']);
+                  final double waterTarget = (profileData?['waterTarget'] ?? 4.0).toDouble();
 
-                return StreamBuilder<DocumentSnapshot>(
-                  stream: _db.todayStats,
-                  builder: (context, statsSnap) {
-                    final statsData = statsSnap.data?.data() as Map<String, dynamic>?;
-                    final currentWater = (statsData?['water'] ?? 0.0) as double;
-                    final mealChecks = Map<String, dynamic>.from(statsData?['meal_checks'] ?? {});
+                  // REGRA: Ao carregar os dados, verifica se precisa agendar as notificações
+                  if (_lastScheduledTarget != waterTarget) {
+                    _lastScheduledTarget = waterTarget;
+                    _notifications.scheduleWaterReminders(waterTarget);
+                  }
 
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: _db.weightHistory,
-                      builder: (context, weightSnap) {
-                        double currentWeight = 0;
-                        List<FlSpot> weightSpots = [];
-                        List<String> dates = [];
+                  final String portionPerSlot = "${(waterTarget / 4).toStringAsFixed(1)}L";
+                  final List<String> intervals = ['07:00 - 12:00', '13:00 - 15:00', '15:00 - 18:30', '18:30 - 22:00'];
 
-                        if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
-                          var docs = weightSnap.data!.docs;
-                          for (int i = 0; i < docs.length; i++) {
-                            var weight = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
-                            weightSpots.add(FlSpot(i.toDouble(), weight));
-                            currentWeight = weight;
-                            if (docs[i]['timestamp'] != null) {
-                              DateTime date = (docs[i]['timestamp'] as Timestamp).toDate();
-                              dates.add(DateFormat('dd/MM').format(date));
-                            } else { dates.add('--'); }
+                  return StreamBuilder<DocumentSnapshot>(
+                    stream: _db.todayStats,
+                    builder: (context, statsSnap) {
+                      final statsData = statsSnap.data?.data() as Map<String, dynamic>?;
+                      final mealChecks = Map<String, dynamic>.from(statsData?['meal_checks'] ?? {});
+                      final waterChecks = Map<String, dynamic>.from(statsData?['water_checks'] ?? {});
+
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: _db.weightHistory,
+                        builder: (context, weightSnap) {
+                          List<FlSpot> weightSpots = [];
+                          List<String> weightDates = [];
+
+                          if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
+                            var docs = weightSnap.data!.docs;
+                            // MOSTRAR APENAS DATA DE UMA SEMANA (7 itens)
+                            int startIndex = docs.length > 7 ? docs.length - 7 : 0;
+                            int chartIndex = 0;
+
+                            for (int i = startIndex; i < docs.length; i++) {
+                              var weight = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
+                              weightSpots.add(FlSpot(chartIndex.toDouble(), weight));
+
+                              var timestamp = docs[i]['timestamp'] as Timestamp?;
+                              weightDates.add(timestamp != null ? DateFormat('dd/MM').format(timestamp.toDate()) : '');
+                              chartIndex++;
+                            }
                           }
-                        }
 
-                        return Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
+                          return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    _buildHeaderIcon(icon: Icons.restaurant_menu, color: Colors.green, label: 'Cardápio', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuPage()))),
-                                    _buildHeaderIcon(icon: Icons.medication_liquid_outlined, color: Colors.purple, label: 'Suplementos', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupplementationPage()))),
-                                    _buildHeaderIcon(icon: Icons.kitchen, color: Colors.orange, label: 'Receitas', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipesPage()))),
-                                    _buildHeaderIcon(icon: Icons.access_alarm, color: Colors.teal, label: 'Alarmes', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MealSchedulePage()))),
-                                    _buildHeaderIcon(icon: Icons.insert_chart_outlined, color: Colors.blue, label: 'Avaliação', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssessmentPage()))),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-
-                              Row(
-                                children: [
-                                  GestureDetector(
-                                    onTap: _pickImage,
-                                    child: Stack(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(3),
-                                          decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [primaryBlue, Colors.tealAccent])),
-                                          child: CircleAvatar(
-                                            radius: 32,
-                                            backgroundColor: Colors.white,
-                                            backgroundImage: (photoUrl != null && photoUrl.startsWith('/')) 
-                                                ? FileImage(File(photoUrl)) as ImageProvider
-                                                : null,
-                                            child: (photoUrl == null || !photoUrl.startsWith('/')) 
-                                                ? Text(firstName.substring(0, 1).toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: primaryBlue))
-                                                : null,
-                                          ),
-                                        ),
-                                        Positioned(bottom: 0, right: 0, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle), child: const Icon(Icons.camera_alt, color: Colors.white, size: 12))),
-                                        if (_isUploading) const Positioned.fill(child: CircularProgressIndicator(strokeWidth: 2)),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  GestureDetector(
-                                    onTap: () => _showEditNameDialog(context, firstName, _db),
-                                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Row(children: [Text('Olá, $firstName!', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)), const SizedBox(width: 4), const Icon(Icons.edit, size: 14, color: Colors.grey)]),
-                                      const Text('Foco na evolução hoje.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                                    ]),
-                                  ),
-                                ],
-                              ),
+                              _buildDietHeader(context, primaryOceanGreen),
                               const SizedBox(height: 25),
-
-                              GestureDetector(
-                                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DietPage())),
-                                child: Container(
-                                  width: double.infinity, padding: const EdgeInsets.all(20),
-                                  decoration: BoxDecoration(gradient: const LinearGradient(colors: [primaryBlue, Color(0xFF4285F4)]), borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: primaryBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(children: [const Icon(Icons.auto_awesome, color: Colors.white, size: 20), const SizedBox(width: 8), Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white.withOpacity(0.9), fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12))]),
-                                      const SizedBox(height: 12),
-                                      Text(nextMeal['title']!, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold)),
-                                      Text('Horário Planejado: ${nextMeal['time']}', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
-                                      const SizedBox(height: 16),
-                                      ... (nextMeal['options'] as List).map((opt) {
-                                        bool isSelected = mealChecks[nextMeal['key']] == opt;
-                                        return GestureDetector(
-                                          onTap: () => _db.toggleMealCompletion(nextMeal['key'], !isSelected ? opt : false),
-                                          child: Container(
-                                            margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                            decoration: BoxDecoration(color: isSelected ? Colors.white : Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.white.withOpacity(0.3))),
-                                            child: Row(children: [Icon(isSelected ? Icons.check_circle : Icons.circle_outlined, color: isSelected ? primaryBlue : Colors.white, size: 20), const SizedBox(width: 10), Expanded(child: Text(opt, style: TextStyle(color: isSelected ? primaryBlue : Colors.white, fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)))]),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 30),
-
-                              const Text('Checklist do Dia', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                              const SizedBox(height: 12),
-                              Container(
-                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]),
-                                child: Column(children: [
-                                  _buildMealCheckItem('Café da Manhã', 'cafe', mealChecks, _db),
-                                  _buildMealCheckItem('Lanche da Manhã', 'lanche_m', mealChecks, _db),
-                                  _buildMealCheckItem('Almoço', 'almoco', mealChecks, _db),
-                                  _buildMealCheckItem('Lanche da Tarde', 'lanche_t', mealChecks, _db),
-                                  _buildMealCheckItem('Jantar', 'jantar', mealChecks, _db),
-                                ]),
-                              ),
-                              const SizedBox(height: 30),
-
-                              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Tendência de Peso', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), TextButton.icon(onPressed: () => _showAddWeightDialog(context, _db), icon: const Icon(Icons.add_chart), label: const Text("PESAR AGORA"), style: TextButton.styleFrom(foregroundColor: primaryBlue))]),
-                              const SizedBox(height: 12),
-                              Container(
-                                height: 220, width: double.infinity, padding: const EdgeInsets.all(20),
-                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]),
-                                child: weightSpots.isEmpty ? const Center(child: Text("Registre seu peso!")) : LineChart(LineChartData(
-                                  gridData: const FlGridData(show: false),
-                                  titlesData: FlTitlesData(
-                                    show: true, 
-                                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), 
-                                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)), 
-                                    leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40, getTitlesWidget: (val, meta) => Text(val.toStringAsFixed(1), style: const TextStyle(fontSize: 10, color: Colors.grey)))),
-                                    bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (value, meta) { int index = value.toInt(); if (index >= 0 && index < dates.length) return Padding(padding: const EdgeInsets.only(top: 10), child: Text(dates[index], style: const TextStyle(fontSize: 10, color: Colors.grey))); return const Text(''); }))
-                                  ),
-                                  borderData: FlBorderData(show: false),
-                                  lineBarsData: [LineChartBarData(spots: weightSpots, isCurved: true, color: primaryBlue, barWidth: 5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: primaryBlue.withOpacity(0.1)))],
-                                )),
-                              ),
-                              const SizedBox(height: 30),
-
-                              Row(children: [
-                                Expanded(child: GestureDetector(onTap: () => _db.addWater(), onLongPress: () => _showEditWaterDialog(context, _db, currentWater), child: _buildSummaryCard(Icons.water_drop, 'Água', '${currentWater.toStringAsFixed(1)}L / ${waterTarget}L', Colors.blue, currentWater / waterTarget))),
-                                const SizedBox(width: 16),
-                                Expanded(child: _buildSummaryCard(Icons.monitor_weight, 'Peso Atual', '${currentWeight > 0 ? currentWeight : "--"} kg', Colors.purple, 0.7)),
-                              ]),
+                              _buildHeaderMenu(context),
+                              const SizedBox(height: 25),
+                              _buildGreeting(displayName, photoUrl, primaryOceanGreen),
                               const SizedBox(height: 20),
+                              _buildSuggestionCard(nextMeal, mealChecks, primaryOceanGreen),
+                              const SizedBox(height: 25),
+                              const Text('Checklist do Dia', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 10),
+                              _buildChecklist(mealChecks),
+                              const SizedBox(height: 25),
+                              _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
+                              const SizedBox(height: 25),
+                              _buildWaterPanel(waterTarget, portionPerSlot, intervals, waterChecks),
+                              const SizedBox(height: 40),
                             ],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
         ],
@@ -367,16 +284,232 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMealCheckItem(String title, String key, Map<String, dynamic> checks, DatabaseService db) {
-    bool isChecked = checks[key] != false && checks[key] != null;
-    return CheckboxListTile(title: Text(title, style: TextStyle(fontSize: 15, decoration: isChecked ? TextDecoration.lineThrough : null, color: isChecked ? Colors.grey : Colors.black87, fontWeight: isChecked ? FontWeight.normal : FontWeight.w500)), value: isChecked, activeColor: const Color(0xFF00796B), contentPadding: const EdgeInsets.symmetric(horizontal: 20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), onChanged: (val) => db.toggleMealCompletion(key, val ?? false));
+  Widget _buildWaterPanel(double waterTarget, String portionPerSlot, List<String> intervals, Map waterChecks) {
+    const Color waterBlue = Color(0xFF0288D1);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF03A9F4), waterBlue],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [BoxShadow(color: waterBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.water_drop, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Text('METAS DE ÁGUA (${waterTarget.toStringAsFixed(1)}L)',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                ],
+              ),
+              GestureDetector(
+                onTap: () => _showEditDailyWaterGoalDialog(waterTarget),
+                child: const Icon(Icons.edit, color: Colors.white70, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          ...intervals.map((time) => _buildWaterRow(time, portionPerSlot, waterChecks[time] ?? false)).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWaterRow(String time, String amount, bool isChecked) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(time, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+          GestureDetector(
+            onTap: () => _db.toggleWaterSlot(time, !isChecked),
+            child: Icon(
+                isChecked ? Icons.check_circle : Icons.radio_button_unchecked,
+                color: Colors.white,
+                size: 26
+            ),
+          ),
+          Text(amount, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeightSection(Color color, List<FlSpot> spots, List<String> dates) {
+    return Column(children: [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        const Text('Tendência Semanal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TextButton(
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeightMonthlyPage())),
+          child: const Text('VER MÊS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+        ),
+        IconButton(onPressed: _showAddWeightDialog, icon: const Icon(Icons.add_chart, color: Colors.black54, size: 22)),
+      ]),
+      const SizedBox(height: 10),
+      Container(
+        height: 200,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+        padding: const EdgeInsets.fromLTRB(10, 20, 20, 10),
+        child: spots.isEmpty
+            ? const Center(child: Text("Sem dados"))
+            : LineChart(LineChartData(
+          lineTouchData: LineTouchData(
+            enabled: true,
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipColor: (spot) => Colors.black.withOpacity(0.8),
+              getTooltipItems: (touchedSpots) => touchedSpots.map((spot) {
+                return LineTooltipItem(
+                  '${spot.y.toStringAsFixed(1)} kg\n${dates[spot.x.toInt()]}',
+                  const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                );
+              }).toList(),
+            ),
+          ),
+          gridData: const FlGridData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  int index = value.toInt();
+                  if (index >= 0 && index < dates.length) {
+                    return Text(dates[index], style: const TextStyle(fontSize: 9, color: Colors.grey));
+                  }
+                  return const SizedBox();
+                },
+              ),
+            ),
+          ),
+          borderData: FlBorderData(show: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              color: Colors.black,
+              barWidth: 3,
+              dotData: FlDotData(
+                show: true,
+                getDotPainter: (spot, percent, barData, index) {
+                  Color dotColor = Colors.yellow;
+                  if (index > 0) {
+                    double prevY = barData.spots[index - 1].y;
+                    if (spot.y > prevY) dotColor = Colors.red;
+                    if (spot.y < prevY) dotColor = Colors.lightGreen;
+                  }
+                  return FlDotCirclePainter(radius: 4, color: dotColor, strokeWidth: 1.5, strokeColor: Colors.black26);
+                },
+              ),
+              belowBarData: BarAreaData(show: true, color: Colors.black.withOpacity(0.02)),
+            )
+          ],
+        )),
+      ),
+    ]);
+  }
+
+  Widget _buildDietHeader(BuildContext context, Color color) {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DietPage())),
+      child: Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+        child: Row(children: [
+          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(Icons.description_outlined, color: color, size: 24)),
+          const SizedBox(width: 15),
+          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('PLANO ALIMENTAR', style: TextStyle(fontWeight: FontWeight.bold)), Text('Clique para ver detalhes', style: TextStyle(fontSize: 11, color: Colors.grey))])),
+          const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey)
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildHeaderMenu(BuildContext context) {
+    return Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+      _buildHeaderIcon(icon: Icons.restaurant_menu, color: Colors.green, label: 'Cardápio', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuPage()))),
+      _buildHeaderIcon(icon: Icons.medication, color: Colors.purple, label: 'Suplementos', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupplementationPage()))),
+      _buildHeaderIcon(icon: Icons.kitchen, color: Colors.orange, label: 'Receitas', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipesPage()))),
+      _buildHeaderIcon(icon: Icons.alarm, color: Colors.teal, label: 'Alarmes', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MealSchedulePage()))),
+      _buildHeaderIcon(icon: Icons.bar_chart, color: Colors.blue, label: 'Avaliação', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssessmentPage()))),
+    ]);
+  }
+
+  Widget _buildGreeting(String name, String? url, Color color) {
+    return Row(children: [
+      CircleAvatar(radius: 25, backgroundColor: color.withOpacity(0.1), backgroundImage: (url != null && url.startsWith('http')) ? NetworkImage(url) : null, child: url == null ? Text(name[0], style: TextStyle(fontWeight: FontWeight.bold, color: color)) : null),
+      const SizedBox(width: 12),
+      Text('Olá, $name! Foco hoje.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+    ]);
+  }
+
+  Widget _buildSuggestionCard(Map<String, dynamic> nextMeal, Map mealChecks, Color color) {
+    bool done = mealChecks[nextMeal['key']] != null;
+    return GestureDetector(
+      onTap: () {
+        _db.toggleMealCompletion(nextMeal['key'], nextMeal['options'][0]);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${nextMeal['title']} marcado!"), backgroundColor: color));
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(gradient: LinearGradient(colors: [color, const Color(0xFF00897B)]), borderRadius: BorderRadius.circular(25)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
+          const SizedBox(height: 5),
+          Text(nextMeal['title'], style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 15),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(15)),
+            child: Row(children: [
+              Icon(done ? Icons.check_circle : Icons.radio_button_unchecked, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(child: Text(nextMeal['options'][0], style: const TextStyle(color: Colors.white, fontSize: 13))),
+            ]),
+          )
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildChecklist(Map checks) {
+    final meals = ['cafe', 'lanche_m', 'almoco', 'lanche_t1', 'jantar'];
+    final labels = ['Café', 'Lanche M', 'Almoço', 'Lanche T', 'Jantar'];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: List.generate(meals.length, (i) {
+        bool checked = checks[meals[i]] != null;
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: FilterChip(
+            label: Text(labels[i], style: TextStyle(color: checked ? Colors.white : Colors.black87)),
+            selected: checked,
+            onSelected: (val) => _db.toggleMealCompletion(meals[i], val),
+            selectedColor: const Color(0xFF00695C),
+            checkmarkColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          ),
+        );
+      })),
+    );
   }
 
   Widget _buildHeaderIcon({required IconData icon, required Color color, required String label, required VoidCallback onPressed}) {
-    return InkWell(onTap: onPressed, borderRadius: BorderRadius.circular(15), child: Padding(padding: const EdgeInsets.all(8.0), child: Column(children: [Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 24)), const SizedBox(height: 6), Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey), overflow: TextOverflow.ellipsis)])));
-  }
-
-  Widget _buildSummaryCard(IconData icon, String label, String value, Color color, double progress) {
-    return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: color, size: 24), const SizedBox(height: 10), Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)), Text(value, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black87)), const SizedBox(height: 12), ClipRRect(borderRadius: BorderRadius.circular(10), child: LinearProgressIndicator(value: progress.clamp(0.0, 1.0), backgroundColor: color.withOpacity(0.1), valueColor: AlwaysStoppedAnimation<Color>(color), minHeight: 6))]));
+    return InkWell(onTap: onPressed, child: Column(children: [
+      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 22)),
+      const SizedBox(height: 4),
+      Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+    ]));
   }
 }

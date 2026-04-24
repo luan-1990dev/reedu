@@ -4,31 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Função auxiliar para pegar o UID atualizado no momento da chamada
+  // Atalho para pegar o UID do usuário logado de forma segura
   String? get _currentUid => FirebaseAuth.instance.currentUser?.uid;
 
-  // Atualizar URL da foto do perfil
-  Future<void> updateProfilePicture(String url) async {
-    final uid = _currentUid;
-    if (uid == null) return;
-    await _db.collection('users').doc(uid).set({
-      'photoUrl': url,
-    }, SetOptions(merge: true));
-  }
+  // --- MÉTODOS DE PERFIL E CADASTRO ---
 
-  // Limpar estatísticas de consumo
-  Future<void> clearMenuStats() async {
-    final uid = _currentUid;
-    if (uid == null) return;
-    
-    final logs = await _db.collection('users').doc(uid).collection('menu_consumption_logs').get();
-    for (var doc in logs.docs) { await doc.reference.delete(); }
-
-    final stats = await _db.collection('users').doc(uid).collection('menu_stats').get();
-    for (var doc in stats.docs) { await doc.reference.delete(); }
-  }
-
-  // Salvar perfil com metas
   Future<void> saveUserProfile(String name, String email, {
     int? age,
     double? height,
@@ -36,20 +16,72 @@ class DatabaseService {
   }) async {
     final uid = _currentUid;
     if (uid == null) return;
-    
+
     await _db.collection('users').doc(uid).set({
       'name': name,
       'email': email,
       'age': age ?? 35,
-      'height': height ?? 1.82,
-      'targetWeight': targetWeight ?? 86.0,
+      'height': height ?? 1.80,
+      'targetWeight': targetWeight ?? 80.0,
       'waterTarget': 4.0,
-      'calorieTarget': 1800,
       'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-  // Salvar cardápio
+  // --- MÉTODOS DE AVALIAÇÃO (ASSESSMENT) ---
+
+  Future<DocumentSnapshot?> getLatestAssessment() async {
+    final uid = _currentUid;
+    if (uid == null) return null;
+    try {
+      final querySnapshot = await _db
+          .collection('users')
+          .doc(uid)
+          .collection('assessments')
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+      if (querySnapshot.docs.isNotEmpty) return querySnapshot.docs.first;
+    } catch (e) {
+      print("Erro ao buscar última avaliação: $e");
+    }
+    return null;
+  }
+
+  /// MÉTODO DE SALVAMENTO: Garante o formato numérico e timestamp
+  Future<void> saveAssessment(Map<String, dynamic> data) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+
+    Map<String, dynamic> processedData = {};
+
+    data.forEach((key, value) {
+      if (value is String) {
+        String cleanValue = value.replaceAll(',', '.').trim();
+        processedData[key] = double.tryParse(cleanValue) ?? value;
+      } else {
+        processedData[key] = value;
+      }
+    });
+
+    await _db.collection('users').doc(uid).collection('assessments').add({
+      ...processedData,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    Map<String, dynamic> profileUpdate = {};
+    if (processedData.containsKey('Peso')) profileUpdate['currentWeight'] = processedData['Peso'];
+    if (processedData.containsKey('IDADE')) profileUpdate['age'] = processedData['IDADE'];
+    if (processedData.containsKey('ALTURA')) profileUpdate['height'] = processedData['ALTURA'];
+    if (processedData.containsKey('PESO META')) profileUpdate['targetWeight'] = processedData['PESO META'];
+
+    if (profileUpdate.isNotEmpty) {
+      await _db.collection('users').doc(uid).set(profileUpdate, SetOptions(merge: true));
+    }
+  }
+
+  // --- MÉTODOS DO CARDÁPIO E ESTATÍSTICAS ---
+
   Future<void> saveMenu(Map<String, String> menu) async {
     final uid = _currentUid;
     if (uid == null) return;
@@ -59,7 +91,50 @@ class DatabaseService {
     }, SetOptions(merge: true));
   }
 
-  // Salvar suplementação
+  Future<void> logMenuOptionConsumption(String mealKey, String option) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+
+    DocumentReference statRef = _db.collection('users').doc(uid).collection('menu_stats').doc('$option:$mealKey');
+
+    await _db.runTransaction((transaction) async {
+      DocumentSnapshot snapshot = await transaction.get(statRef);
+      if (!snapshot.exists) {
+        transaction.set(statRef, {'count': 1, 'mealType': mealKey, 'option': option});
+      } else {
+        int currentCount = (snapshot.data() as Map<String, dynamic>)['count'] ?? 0;
+        transaction.update(statRef, {'count': currentCount + 1});
+      }
+    });
+  }
+
+  Stream<QuerySnapshot> get topMenuOptions {
+    return _db
+        .collection('users')
+        .doc(_currentUid)
+        .collection('menu_stats')
+        .orderBy('count', descending: true)
+        .limit(10)
+        .snapshots();
+  }
+
+  Future<void> clearMenuStats() async {
+    final uid = _currentUid;
+    if (uid == null) return;
+    final stats = await _db.collection('users').doc(uid).collection('menu_stats').get();
+    for (var doc in stats.docs) {
+      await doc.reference.delete();
+    }
+  }
+
+  // --- MÉTODOS DE AGENDA E SUPLEMENTOS ---
+
+  Future<void> saveMealSchedule(List<Map<String, dynamic>> schedules) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+    await _db.collection('users').doc(uid).set({'meal_schedules': schedules}, SetOptions(merge: true));
+  }
+
   Future<void> saveSupplements(Map<String, String> supplements) async {
     final uid = _currentUid;
     if (uid == null) return;
@@ -69,52 +144,7 @@ class DatabaseService {
     }, SetOptions(merge: true));
   }
 
-  // Registrar consumo inteligente (30 dias)
-  Future<void> logMenuOptionConsumption(String mealType, String option) async {
-    final uid = _currentUid;
-    if (uid == null) return;
-    
-    final now = DateTime.now();
-    final thirtyDaysAgo = now.subtract(const Duration(days: 30));
-
-    final oldLogs = await _db.collection('users').doc(uid)
-        .collection('menu_consumption_logs')
-        .where('timestamp', isLessThan: thirtyDaysAgo)
-        .get();
-    
-    for (var doc in oldLogs.docs) { await doc.reference.delete(); }
-
-    await _db.collection('users').doc(uid).collection('menu_consumption_logs').add({
-      'mealType': mealType,
-      'option': option,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-
-    final activeLogs = await _db.collection('users').doc(uid).collection('menu_consumption_logs').get();
-    final currentStats = await _db.collection('users').doc(uid).collection('menu_stats').get();
-    for (var doc in currentStats.docs) { await doc.reference.delete(); }
-
-    Map<String, int> counts = {};
-    Map<String, String> types = {};
-    for (var log in activeLogs.docs) {
-      String opt = log['option'];
-      counts[opt] = (counts[opt] ?? 0) + 1;
-      types[opt] = log['mealType'];
-    }
-
-    for (var entry in counts.entries) {
-      await _db.collection('users').doc(uid).collection('menu_stats').doc(entry.key).set({
-        'count': entry.value,
-        'mealType': types[entry.key],
-      });
-    }
-  }
-
-  Future<void> saveMealSchedule(List<Map<String, dynamic>> schedules) async {
-    final uid = _currentUid;
-    if (uid == null) return;
-    await _db.collection('users').doc(uid).set({'meal_schedules': schedules}, SetOptions(merge: true));
-  }
+  // --- CONTROLE DIÁRIO (CHECKS E ÁGUA) ---
 
   Future<void> toggleMealCompletion(String mealKey, dynamic status) async {
     final uid = _currentUid;
@@ -124,18 +154,48 @@ class DatabaseService {
 
     await _db.runTransaction((transaction) async {
       DocumentSnapshot snapshot = await transaction.get(statsDoc);
-      Map<String, dynamic> mealStatus = {};
-      if (snapshot.exists) {
-        mealStatus = Map<String, dynamic>.from((snapshot.data() as Map<String, dynamic>)['meal_checks'] ?? {});
-      }
+      Map<String, dynamic> mealStatus = snapshot.exists ? Map<String, dynamic>.from((snapshot.data() as Map)['meal_checks'] ?? {}) : {};
       mealStatus[mealKey] = status;
-      if (!snapshot.exists) {
-        transaction.set(statsDoc, {'meal_checks': mealStatus, 'water': 0.0, 'calories': 0});
-      } else {
-        transaction.update(statsDoc, {'meal_checks': mealStatus});
+      transaction.set(statsDoc, {'meal_checks': mealStatus}, SetOptions(merge: true));
+    });
+
+    if (status is String) {
+      await logMenuOptionConsumption(mealKey, status);
+    }
+  }
+
+  // --- NOVOS MÉTODOS DE ÁGUA POR TURNO ---
+
+  Future<void> updateWaterSlotAmount(String slotKey, String amount) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+
+    await _db.collection('users').doc(uid).set({
+      'water_goals': {
+        slotKey: amount,
       }
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> toggleWaterSlot(String slotKey, bool status) async {
+    final uid = _currentUid;
+    if (uid == null) return;
+
+    String today = DateTime.now().toIso8601String().split('T')[0];
+    DocumentReference statsDoc = _db.collection('users').doc(uid).collection('daily_stats').doc(today);
+
+    await _db.runTransaction((transaction) async {
+      DocumentSnapshot snapshot = await transaction.get(statsDoc);
+      Map<String, dynamic> waterChecks = {};
+      if (snapshot.exists) {
+        waterChecks = Map<String, dynamic>.from((snapshot.data() as Map)['water_checks'] ?? {});
+      }
+      waterChecks[slotKey] = status;
+      transaction.set(statsDoc, {'water_checks': waterChecks}, SetOptions(merge: true));
     });
   }
+
+  // --- MÉTODOS GERAIS DE ÁGUA ---
 
   Future<void> addWater([double amount = 0.25]) async {
     final uid = _currentUid;
@@ -145,38 +205,31 @@ class DatabaseService {
 
     await _db.runTransaction((transaction) async {
       DocumentSnapshot snapshot = await transaction.get(waterDoc);
-      if (!snapshot.exists) {
-        transaction.set(waterDoc, {'water': amount, 'calories': 0});
-      } else {
-        double currentWater = (snapshot.data() as Map<String, dynamic>)['water'] ?? 0.0;
-        transaction.update(waterDoc, {'water': currentWater + amount});
-      }
+      double current = snapshot.exists ? (snapshot.data() as Map<String, dynamic>)['water'] ?? 0.0 : 0.0;
+      transaction.set(waterDoc, {'water': current + amount}, SetOptions(merge: true));
     });
   }
 
   Future<void> setWaterTotal(double total) async {
-    final uid = _currentUid;
-    if (uid == null) return;
     String today = DateTime.now().toIso8601String().split('T')[0];
-    await _db.collection('users').doc(uid).collection('daily_stats').doc(today).set({'water': total}, SetOptions(merge: true));
+    await _db.collection('users').doc(_currentUid).collection('daily_stats').doc(today).set({'water': total}, SetOptions(merge: true));
   }
 
-  Future<void> saveAssessment(Map<String, dynamic> data) async {
-    final uid = _currentUid;
-    if (uid == null) return;
-    Map<String, dynamic> processedData = {};
-    data.forEach((key, value) { processedData[key] = double.tryParse(value.toString().replaceAll(',', '.')) ?? value; });
-    await _db.collection('users').doc(uid).collection('assessments').add({...processedData, 'timestamp': FieldValue.serverTimestamp()});
-    if (processedData.containsKey('Peso')) {
-      await _db.collection('users').doc(uid).set({'currentWeight': processedData['Peso']}, SetOptions(merge: true));
-    }
+  Future<void> updateProfilePicture(String url) async {
+    await _db.collection('users').doc(_currentUid).set({'photoUrl': url}, SetOptions(merge: true));
   }
 
-  Stream<QuerySnapshot> get topMenuOptions => _db.collection('users').doc(_currentUid).collection('menu_stats').orderBy('count', descending: true).limit(5).snapshots();
-  Stream<QuerySnapshot> get weightHistory => _db.collection('users').doc(_currentUid).collection('assessments').orderBy('timestamp', descending: false).snapshots();
-  Stream<DocumentSnapshot> get todayStats {
-    String today = DateTime.now().toIso8601String().split('T')[0];
-    return _db.collection('users').doc(_currentUid).collection('daily_stats').doc(today).snapshots();
+  // --- STREAMS ---
+
+  Stream<QuerySnapshot> get weightHistory {
+    return _db
+        .collection('users')
+        .doc(_currentUid)
+        .collection('assessments')
+        .orderBy('timestamp', descending: false)
+        .snapshots();
   }
+
+  Stream<DocumentSnapshot> get todayStats => _db.collection('users').doc(_currentUid).collection('daily_stats').doc(DateTime.now().toIso8601String().split('T')[0]).snapshots();
   Stream<DocumentSnapshot> get userProfileStream => _db.collection('users').doc(_currentUid).snapshots();
 }

@@ -28,11 +28,11 @@ class _LoginPageState extends State<LoginPage> {
       );
       return;
     }
-    
+
     setState(() => _isLoading = true);
     try {
       await _authService.signInWithEmail(
-        _emailController.text.trim(), 
+        _emailController.text.trim(),
         _passwordController.text.trim()
       );
     } catch (e) {
@@ -59,9 +59,9 @@ class _LoginPageState extends State<LoginPage> {
         setState(() => _isLoading = false);
         if (userCredential != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Bem-vindo(a) via Google!', textAlign: TextAlign.center),
-              backgroundColor: Colors.teal.shade700,
+            const SnackBar(
+              content: Text('Bem-vindo(a) via Google!', textAlign: TextAlign.center),
+              backgroundColor: Color(0xFF2E7D32),
               behavior: SnackBarBehavior.floating,
             )
           );
@@ -75,16 +75,14 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _loginWithBiometrics() async {
     try {
       final user = await _authService.signInWithBiometrics();
-      if (mounted) {
-        if (user == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Realize o primeiro login via e-mail para ativar a biometria.', textAlign: TextAlign.center),
-              backgroundColor: Colors.blueGrey,
-              behavior: SnackBarBehavior.floating,
-            )
-          );
-        }
+      if (mounted && user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Realize o primeiro login via e-mail para ativar a biometria.', textAlign: TextAlign.center),
+            backgroundColor: Colors.blueGrey,
+            behavior: SnackBarBehavior.floating,
+          )
+        );
       }
     } catch (e) {}
   }
@@ -99,123 +97,121 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     const Color primaryBlue = Color(0xFF1967D2);
-    
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F9FF),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 30.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // LOGOTIPO REEDU SUBSTITUINDO O TEXTO
-                Image.asset(
-                  'assets/icon/app_icon.png', 
-                  height: 120,
-                  errorBuilder: (_, __, ___) => const Icon(Icons.lock_person_rounded, size: 80, color: primaryBlue),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 30.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Spacer(flex: 2),
+              // LOGOTIPO REEDU COMPACTADO
+              Image.asset(
+                'assets/icon/app_icon.home.png',
+                width: 220,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.lock_person_rounded, size: 60, color: primaryBlue),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Acesse sua conta para continuar.',
+                style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 25),
+              TextField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: 'E-mail',
+                  prefixIcon: const Icon(Icons.email_outlined, color: primaryBlue, size: 20),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Colors.black12)),
                 ),
-                const SizedBox(height: 30),
-                const Text(
-                  'Acesse sua conta para continuar.',
-                  style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 40),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
-                    labelText: 'E-mail',
-                    prefixIcon: const Icon(Icons.email_outlined, color: primaryBlue),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Colors.black12)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passwordController,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: 'Senha',
+                  prefixIcon: const Icon(Icons.lock_outline, color: primaryBlue, size: 20),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                   ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Colors.black12)),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  decoration: InputDecoration(
-                    labelText: 'Senha',
-                    prefixIcon: const Icon(Icons.lock_outline, color: primaryBlue),
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Colors.black12)),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _login,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    elevation: 2,
                   ),
+                  child: _isLoading
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('ENTRAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                 ),
-                const SizedBox(height: 30),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryBlue,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                      elevation: 2,
-                    ),
-                    child: _isLoading 
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('ENTRAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: _isLoading ? null : _loginWithGoogle,
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.black12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                   ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: OutlinedButton(
-                    onPressed: _isLoading ? null : _loginWithGoogle,
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.black12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Image.network(
-                          'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1200px-Google_%22G%22_logo.svg.png', 
-                          height: 24, 
-                          errorBuilder: (_, __, ___) => const Icon(Icons.account_circle_outlined)
-                        ),
-                        const SizedBox(width: 12),
-                        const Text('ENTRAR COM GOOGLE', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 40),
-                GestureDetector(
-                  onTap: _loginWithBiometrics,
-                  child: Column(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.fingerprint, size: 50, color: primaryBlue.withOpacity(0.6)),
-                      const SizedBox(height: 8),
-                      const Text('Acesso por Biometria', style: TextStyle(color: Colors.blueGrey, fontSize: 12)),
+                      Image.network(
+                        'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1200px-Google_%22G%22_logo.svg.png',
+                        height: 20,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.account_circle_outlined, size: 20)
+                      ),
+                      const SizedBox(width: 10),
+                      const Text('ENTRAR COM GOOGLE', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
                     ],
                   ),
                 ),
-                const SizedBox(height: 40),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Ainda não tem conta? '),
-                    GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterPage())),
-                      child: const Text('Cadastre-se', style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 20),
+              // BOTÃO DE BIOMETRIA ADICIONADO
+              IconButton(
+                onPressed: _loginWithBiometrics,
+                icon: const Icon(Icons.fingerprint, size: 48, color: primaryBlue),
+                tooltip: 'Acesso por biometria',
+              ),
+              const Text('Biometria', style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+              const Spacer(flex: 3),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('Ainda não tem conta? ', style: TextStyle(fontSize: 13)),
+                  GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterPage())),
+                    child: const Text('Cadastre-se', style: TextStyle(color: primaryBlue, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
           ),
         ),
       ),

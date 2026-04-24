@@ -1,8 +1,7 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/database_service.dart';
 
@@ -15,44 +14,94 @@ class AssessmentPage extends StatefulWidget {
 
 class _AssessmentPageState extends State<AssessmentPage> {
   final DatabaseService _db = DatabaseService();
+  final Map<String, TextEditingController> _controllers = {};
+  final Map<String, FocusNode> _focusNodes = {};
+
   bool _isEditing = false;
   bool _isLoading = false;
 
-  final Map<String, TextEditingController> _controllers = {
-    'NOME': TextEditingController(text: 'Luan Oliveira Inácio'),
-    'IDADE': TextEditingController(text: '35'),
-    'ALTURA': TextEditingController(text: '1.82'),
-    'PESO META': TextEditingController(text: '86'),
-    'Peso': TextEditingController(text: '96.3'),
-    'Braço direito': TextEditingController(text: '34'),
-    'Braço esquerdo': TextEditingController(text: '34'),
-    'Cintura': TextEditingController(text: '99'),
-    'Abdomên': TextEditingController(text: '103'),
-    'Peitoral': TextEditingController(text: '108'),
-    'Quadril': TextEditingController(text: '104'),
-    'Coxa direita': TextEditingController(text: '49'),
-    'Coxa esquerda': TextEditingController(text: '50'),
-    'Panturrilha direita': TextEditingController(text: '35'),
-    'Panturrilha esquerda': TextEditingController(text: '35'),
-    'IMC': TextEditingController(text: '29.2'),
-    'PGC': TextEditingController(text: '31.7'),
-    'PME': TextEditingController(text: '31.0'),
-    'MB': TextEditingController(text: '1958'),
-    'IC': TextEditingController(text: '64'),
-    'GV': TextEditingController(text: '12'),
-    'Triciptal': TextEditingController(text: '20'),
-    'Subescapular': TextEditingController(text: '30'),
-    'Axilar média': TextEditingController(text: '40'),
-    'Suprailíaca': TextEditingController(text: '45'),
-    'Peitoral Pregas': TextEditingController(text: '12'),
-    'Abdominal': TextEditingController(text: '45'),
-    'Coxa Pregas': TextEditingController(text: '13'),
-  };
+  final List<String> _fields = [
+    'NOME', 'IDADE', 'ALTURA', 'PESO META',
+    'Peso', 'Braço direito', 'Braço esquerdo', 'Cintura', 'Abdomên',
+    'Peitoral', 'Quadril', 'Coxa direita', 'Coxa esquerda',
+    'Panturrilha direita', 'Panturrilha esquerda',
+    'IMC', 'PGC', 'PME', 'MB', 'IC', 'GV'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    for (var field in _fields) {
+      _controllers[field] = TextEditingController();
+      _focusNodes[field] = FocusNode();
+      _focusNodes[field]!.addListener(() => setState(() {}));
+    }
+    _loadAllData();
+  }
+
+  Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
+    try {
+      final userSnap = await _db.userProfileStream.first;
+      final lastEval = await _db.getLatestAssessment();
+
+      if (mounted) {
+        setState(() {
+          if (userSnap.exists) {
+            final u = userSnap.data() as Map<String, dynamic>;
+            _controllers['NOME']!.text = u['nickname'] ?? u['name'] ?? '';
+            _controllers['IDADE']!.text = u['age']?.toString() ?? '';
+            _controllers['ALTURA']!.text = u['height']?.toString() ?? '';
+            _controllers['PESO META']!.text = u['targetWeight']?.toString() ?? '';
+          }
+          if (lastEval != null) {
+            final e = lastEval.data() as Map<String, dynamic>;
+            for (var f in _fields) {
+              if (e.containsKey(f) && _controllers[f]!.text.isEmpty) {
+                _controllers[f]!.text = e[f].toString();
+              }
+            }
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   void dispose() {
-    for (var c in _controllers.values) { c.dispose(); }
+    for (var f in _fields) {
+      _controllers[f]?.dispose();
+      _focusNodes[f]?.dispose();
+    }
     super.dispose();
+  }
+
+  Color _getValueColor(String key, String value) {
+    double? val = double.tryParse(value.replaceAll(',', '.'));
+    if (val == null) return Colors.black87;
+    switch (key) {
+      case 'IMC':
+        if (val > 30 || val < 17) return Colors.red;
+        if (val > 25) return Colors.orange;
+        return Colors.green.shade700;
+      case 'PGC':
+        if (val > 25) return Colors.red;
+        if (val > 20) return Colors.orange;
+        return Colors.green.shade700;
+      case 'PME':
+        if (val < 30) return Colors.red;
+        if (val < 33.3) return Colors.orange;
+        return Colors.green.shade700;
+      case 'GV':
+        if (val > 12) return Colors.red;
+        if (val > 9) return Colors.orange;
+        return Colors.green.shade700;
+      default:
+        return Colors.black87;
+    }
   }
 
   Future<void> _importPDF() async {
@@ -60,20 +109,14 @@ class _AssessmentPageState extends State<AssessmentPage> {
       FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
       if (result != null) {
         setState(() => _isLoading = true);
-        File file = File(result.files.single.path!);
-        final PdfDocument document = PdfDocument(inputBytes: file.readAsBytesSync());
+        final bytes = File(result.files.single.path!).readAsBytesSync();
+        final document = PdfDocument(inputBytes: bytes);
         String text = PdfTextExtractor(document).extractText();
         document.dispose();
         _smartParse(text);
-        if (mounted) {
-          setState(() => _isLoading = false);
-          _isEditing = true;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dados importados! Verifique e salve para o histórico.'), backgroundColor: Colors.teal));
-        }
+        setState(() { _isLoading = false; _isEditing = true; });
       }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } catch (e) { setState(() => _isLoading = false); }
   }
 
   void _smartParse(String rawText) {
@@ -82,15 +125,18 @@ class _AssessmentPageState extends State<AssessmentPage> {
       for (var key in keys) {
         final pattern = RegExp('$key[:\\s\\-]*([\\d+[\\.,]?\\d*)', caseSensitive: false);
         final match = pattern.firstMatch(text);
-        if (match != null && match.group(1) != null) return match.group(1)!.replaceAll(',', '.');
+        if (match != null) return match.group(1)!.replaceAll(',', '.');
       }
       return null;
     }
     setState(() {
-      _controllers['Peso']?.text = find(['Peso', 'Massa Corporal']) ?? _controllers['Peso']!.text;
-      _controllers['IMC']?.text = find(['IMC', 'Índice de Massa']) ?? _controllers['IMC']!.text;
-      _controllers['PGC']?.text = find(['PGC', 'Gordura Corporal', '% Gordura']) ?? _controllers['PGC']!.text;
-      _controllers['PME']?.text = find(['PME', 'Massa Magra', 'Massa Muscular']) ?? _controllers['PME']!.text;
+      _controllers['Peso']!.text = find(['Peso', 'Massa Corporal']) ?? _controllers['Peso']!.text;
+      _controllers['IDADE']!.text = find(['Idade', 'Anos']) ?? _controllers['IDADE']!.text;
+      _controllers['ALTURA']!.text = find(['Estatura', 'Altura']) ?? _controllers['ALTURA']!.text;
+      _controllers['IMC']!.text = find(['IMC']) ?? _controllers['IMC']!.text;
+      _controllers['PGC']!.text = find(['PGC', 'Gordura']) ?? _controllers['PGC']!.text;
+      _controllers['PME']!.text = find(['PME', 'Massa Magra']) ?? _controllers['PME']!.text;
+      _controllers['GV']!.text = find(['GV', 'Visceral']) ?? _controllers['GV']!.text;
     });
   }
 
@@ -98,22 +144,9 @@ class _AssessmentPageState extends State<AssessmentPage> {
     setState(() => _isLoading = true);
     Map<String, dynamic> data = {};
     _controllers.forEach((key, controller) => data[key] = controller.text);
-    try {
-      await _db.saveAssessment(data);
-      if (mounted) {
-        setState(() { _isEditing = false; _isLoading = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Avaliação salva no histórico!', textAlign: TextAlign.center),
-            backgroundColor: Colors.teal.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    await _db.saveAssessment(data);
+    setState(() { _isEditing = false; _isLoading = false; });
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Avaliação salva!'), backgroundColor: Colors.teal));
   }
 
   void _showEvolutionCharts() {
@@ -122,37 +155,56 @@ class _AssessmentPageState extends State<AssessmentPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.8,
-        decoration: const BoxDecoration(color: Color(0xFFF0F4F8), borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+            color: Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30))
+        ),
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(10))),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(10))),
             const SizedBox(height: 20),
-            const Row(children: [Icon(Icons.auto_graph, color: Colors.blue), SizedBox(width: 10), Text('MINHA EVOLUÇÃO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey))]),
-            const SizedBox(height: 20),
+            Row(
+              children: const [
+                Icon(Icons.auto_awesome, color: Color(0xFF3B82F6), size: 20),
+                SizedBox(width: 10),
+                Text('MINHA EVOLUÇÃO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF475569))),
+              ],
+            ),
+            const SizedBox(height: 25),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: _db.weightHistory,
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma avaliação salva ainda.'));
-                  
-                  final docs = snapshot.data!.docs;
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  var docs = snapshot.data!.docs;
+                  if (docs.isEmpty) return const Center(child: Text("Sem dados para exibir"));
+
                   List<FlSpot> weightSpots = [];
                   List<FlSpot> fatSpots = [];
-                  
+
                   for (int i = 0; i < docs.length; i++) {
                     final data = docs[i].data() as Map<String, dynamic>;
-                    weightSpots.add(FlSpot(i.toDouble(), double.tryParse(data['Peso'].toString()) ?? 0));
-                    fatSpots.add(FlSpot(i.toDouble(), double.tryParse(data['PGC'].toString()) ?? 0));
+                    double w = 0;
+                    if (data.containsKey('Peso')) {
+                      w = double.tryParse(data['Peso'].toString().replaceAll(',', '.')) ?? 0;
+                    }
+                    weightSpots.add(FlSpot(i.toDouble(), w));
+
+                    double f = 0;
+                    if (data.containsKey('PGC')) {
+                      f = double.tryParse(data['PGC'].toString().replaceAll(',', '.')) ?? 0;
+                    }
+                    fatSpots.add(FlSpot(i.toDouble(), f));
                   }
 
                   return ListView(
+                    physics: const BouncingScrollPhysics(),
                     children: [
                       _buildChartCard('Evolução de Peso (kg)', weightSpots, Colors.blue),
                       const SizedBox(height: 20),
                       _buildChartCard('Gordura Corporal (%)', fatSpots, Colors.redAccent),
-                      const SizedBox(height: 40),
                     ],
                   );
                 },
@@ -166,19 +218,35 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
   Widget _buildChartCard(String title, List<FlSpot> spots, Color color) {
     return Container(
-      height: 250, padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
+      height: 240,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(25),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
-          const SizedBox(height: 20),
-          Expanded(child: LineChart(LineChartData(
-            gridData: const FlGridData(show: false),
-            titlesData: const FlTitlesData(show: false),
-            borderData: FlBorderData(show: false),
-            lineBarsData: [LineChartBarData(spots: spots, isCurved: true, color: color, barWidth: 4, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: color.withOpacity(0.1)))],
-          ))),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF64748B), fontSize: 14)),
+          const SizedBox(height: 15),
+          Expanded(
+            child: LineChart(LineChartData(
+              gridData: const FlGridData(show: false),
+              titlesData: const FlTitlesData(show: false),
+              borderData: FlBorderData(show: false),
+              lineBarsData: [
+                LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    color: color,
+                    barWidth: 3,
+                    dotData: const FlDotData(show: true),
+                    belowBarData: BarAreaData(show: true, color: color.withOpacity(0.05))
+                )
+              ],
+            )),
+          ),
         ],
       ),
     );
@@ -186,77 +254,69 @@ class _AssessmentPageState extends State<AssessmentPage> {
 
   @override
   Widget build(BuildContext context) {
-    const Color primaryBlue = Color(0xFF1967D2);
-    const Color bgSoft = Color(0xFFF0F4F8);
+    // COR DO BOTÃO E AGORA DO TOPO
+    const Color darkBlue = Color(0xFF00008B);
 
     return Scaffold(
-      backgroundColor: bgSoft,
-      body: CustomScrollView(
+      backgroundColor: const Color(0xFFF1F5F9),
+      body: _isLoading ? const Center(child: CircularProgressIndicator()) : CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 150.0,
+            expandedHeight: 160.0,
             pinned: true,
-            backgroundColor: primaryBlue,
-            elevation: 0,
-            leadingWidth: 100,
-            leading: Row(
-              children: [
-                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
-                IconButton(icon: const Icon(Icons.trending_down, color: Colors.white), onPressed: _showEvolutionCharts, tooltip: 'Ver Evolução'),
-              ],
-            ),
+            backgroundColor: darkBlue, // Alterado para o azul escuro do botão
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
-              if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
-              else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF),
+              IconButton(
+                icon: Icon(_isEditing ? Icons.check : Icons.edit, color: Colors.white, size: 28),
+                onPressed: () => _isEditing ? _saveData() : setState(() => _isEditing = true),
+              ),
             ],
             flexibleSpace: FlexibleSpaceBar(
-              centerTitle: true,
-              title: const Text('Minha Avaliação', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
               background: Container(
                 decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryBlue, Color(0xFF4285F4)]),
+                    gradient: LinearGradient(
+                        colors: [Color(0xFF1A1A9E), darkBlue], // Gradiente combinando com o botão
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter
+                    )
                 ),
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 40),
-                    child: _buildHeaderInfoModern(),
-                  ),
-                ),
+                child: Center(child: Padding(padding: const EdgeInsets.only(top: 40), child: _buildHeader())),
               ),
             ),
           ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(16.0),
+              padding: const EdgeInsets.all(20.0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildModernSection('MEDIDAS PERIFÉRICAS', Icons.straighten, [
-                    _buildModernRow('Peso', 'Peso', suffix: ' kg'),
-                    _buildModernRow('Braço direito', 'Braço direito', suffix: ' cm'),
-                    _buildModernRow('Braço esquerdo', 'Braço esquerdo', suffix: ' cm'),
-                    _buildModernRow('Cintura', 'Cintura', suffix: ' cm'),
-                    _buildModernRow('Abdomên', 'Abdomên', suffix: ' cm'),
-                    _buildModernRow('Peitoral', 'Peitoral', suffix: ' cm'),
-                    _buildModernRow('Quadril', 'Quadril', suffix: ' cm'),
-                    _buildModernRow('Coxa direita', 'Coxa direita', suffix: ' cm'),
-                    _buildModernRow('Coxa esquerda', 'Coxa esquerda', suffix: ' cm'),
-                    _buildModernRow('Panturrilha dir.', 'Panturrilha direita', suffix: ' cm'),
-                    _buildModernRow('Panturrilha esq.', 'Panturrilha esquerda', suffix: ' cm'),
+                  _buildEvolutionButton(darkBlue), // Passando a cor para o botão
+                  const SizedBox(height: 25),
+                  _buildSection('MEDIDAS PERIFÉRICAS', Icons.straighten, [
+                    _buildHighlightedRow('Peso', 'Peso', 'kg'),
+                    _buildHighlightedRow('Braço direito', 'Braço direito', 'cm'),
+                    _buildHighlightedRow('Braço esquerdo', 'Braço esquerdo', 'cm'),
+                    _buildHighlightedRow('Cintura', 'Cintura', 'cm'),
+                    _buildHighlightedRow('Abdomên', 'Abdomên', 'cm'),
+                    _buildHighlightedRow('Peitoral', 'Peitoral', 'cm'),
+                    _buildHighlightedRow('Quadril', 'Quadril', 'cm'),
+                    _buildHighlightedRow('Coxa direita', 'Coxa direita', 'cm'),
+                    _buildHighlightedRow('Coxa esquerda', 'Coxa esquerda', 'cm'),
+                    _buildHighlightedRow('Panturrilha dir.', 'Panturrilha direita', 'cm'),
+                    _buildHighlightedRow('Panturrilha esq.', 'Panturrilha esquerda', 'cm'),
                   ]),
                   const SizedBox(height: 20),
-                  _buildModernSection('BIOIMPEDÂNCIA', Icons.analytics_outlined, [
-                    _buildModernRow('IMC', 'IMC', suffix: ' kg/m²'),
-                    _buildModernRow('PGC (Gordura)', 'PGC', suffix: ' %'),
-                    _buildModernRow('PME (Massa Magra)', 'PME', suffix: ' %'),
-                    _buildModernRow('MB (Metabolismo)', 'MB', suffix: ' kcal'),
-                    _buildModernRow('IC (Idade Corporal)', 'IC', suffix: ' anos'),
-                    _buildModernRow('GV (Gordura Visceral)', 'GV', suffix: ' nível'),
+                  _buildSection('BIOIMPEDÂNCIA', Icons.analytics_outlined, [
+                    _buildHighlightedRow('IMC', 'IMC', 'kg/m²'),
+                    _buildHighlightedRow('PGC (Gordura)', 'PGC', '%'),
+                    _buildHighlightedRow('PME (Massa Magra)', 'PME', '%'),
+                    _buildHighlightedRow('MB (Metabolismo)', 'MB', 'kcal'),
+                    _buildHighlightedRow('IC (Idade Corporal)', 'IC', 'anos'),
+                    _buildHighlightedRow('GV (Gordura Visceral)', 'GV', 'nível'),
                   ]),
                   const SizedBox(height: 20),
                   _buildIdealValuesCard(),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 50),
                 ],
               ),
             ),
@@ -266,111 +326,140 @@ class _AssessmentPageState extends State<AssessmentPage> {
     );
   }
 
-  Widget _buildHeaderInfoModern() {
-    return _isEditing 
-      ? Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: _controllers['NOME'], style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'NOME', labelStyle: TextStyle(color: Colors.white70), enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white30)))),
-              Row(
-                children: [
-                  Expanded(child: TextField(controller: _controllers['IDADE'], style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'IDADE', labelStyle: TextStyle(color: Colors.white70)))),
-                  const SizedBox(width: 8),
-                  Expanded(child: TextField(controller: _controllers['ALTURA'], style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: 'ALTURA', labelStyle: TextStyle(color: Colors.white70)))),
-                ],
-              )
-            ],
-          ),
-        )
-      : Column(
+  Widget _buildHeader() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _isEditing
+            ? _headerTextField('NOME')
+            : Text(_controllers['NOME']!.text.isEmpty ? "Usuário" : _controllers['NOME']!.text,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+        const SizedBox(height: 15),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _editableChip(Icons.cake, 'IDADE', ' anos', "Idade para metabolismo"),
+            const SizedBox(width: 8),
+            _editableChip(Icons.height, 'ALTURA', ' m', "Altura em metros"),
+            const SizedBox(width: 8),
+            _editableChip(Icons.flag, 'PESO META', ' kg', "Meta de peso", prefix: 'Meta: '),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _headerTextField(String key) {
+    return SizedBox(
+      width: 200,
+      child: TextField(
+        controller: _controllers[key],
+        focusNode: _focusNodes[key],
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+        decoration: const InputDecoration(
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white, width: 2)),
+        ),
+      ),
+    );
+  }
+
+  Widget _editableChip(IconData icon, String key, String suffix, String tooltip, {String prefix = ''}) {
+    bool hasFocus = _focusNodes[key]?.hasFocus ?? false;
+    return Tooltip(
+      message: tooltip,
+      triggerMode: TooltipTriggerMode.tap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: hasFocus ? Colors.white.withOpacity(0.4) : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: hasFocus ? Colors.white : Colors.transparent, width: 1.5),
+        ),
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_controllers['NOME']!.text, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildHeaderBadge(Icons.cake, '${_controllers['IDADE']!.text} anos'),
-                const SizedBox(width: 12),
-                _buildHeaderBadge(Icons.height, '${_controllers['ALTURA']!.text} m'),
-                const SizedBox(width: 12),
-                _buildHeaderBadge(Icons.flag, 'Meta: ${_controllers['PESO META']!.text}kg'),
-              ],
-            ),
+            Icon(icon, color: Colors.white, size: 14),
+            const SizedBox(width: 5),
+            _isEditing
+                ? IntrinsicWidth(child: TextField(
+              controller: _controllers[key],
+              focusNode: _focusNodes[key],
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+              decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+            ))
+                : Text('$prefix${_controllers[key]!.text}$suffix', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
           ],
-        );
-  }
-
-  Widget _buildHeaderBadge(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
-      child: Row(children: [Icon(icon, size: 14, color: Colors.white70), const SizedBox(width: 4), Text(text, style: const TextStyle(color: Colors.white, fontSize: 12))]),
+        ),
+      ),
     );
   }
 
-  Widget _buildModernSection(String title, IconData icon, List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
-      child: Column(children: [Padding(padding: const EdgeInsets.all(16), child: Row(children: [Icon(icon, color: Colors.blue, size: 20), const SizedBox(width: 8), Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))])), ...children, const SizedBox(height: 8)]),
-    );
-  }
-
-  Widget _buildModernRow(String label, String key, {required String suffix}) {
+  Widget _buildHighlightedRow(String label, String key, String suffix) {
+    bool hasFocus = _focusNodes[key]?.hasFocus ?? false;
     String value = _controllers[key]?.text ?? '';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: const TextStyle(color: Colors.black54, fontSize: 14)),
-        _isEditing 
-          ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold), decoration: InputDecoration(suffixText: suffix, isDense: true)))
-          : Text('$value$suffix', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _getStatusColor(key, value))),
-      ]),
+    Color valueColor = _getValueColor(key, value);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: hasFocus ? Colors.blue.withOpacity(0.08) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: hasFocus ? Colors.blue.withOpacity(0.4) : Colors.transparent),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: hasFocus ? Colors.blue.shade700 : Colors.black54, fontWeight: hasFocus ? FontWeight.bold : FontWeight.normal)),
+          SizedBox(
+            width: 100,
+            child: TextField(
+              controller: _controllers[key],
+              focusNode: _focusNodes[key],
+              enabled: _isEditing,
+              textAlign: TextAlign.end,
+              keyboardType: TextInputType.number,
+              style: TextStyle(fontWeight: FontWeight.bold, color: valueColor),
+              decoration: InputDecoration(suffixText: ' $suffix', border: InputBorder.none, isDense: true),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Color _getStatusColor(String key, String value) {
-    double? val = double.tryParse(value.replaceAll(',', '.'));
-    if (val == null) return Colors.black87;
-    switch (key) {
-      case 'IMC':
-        if (val < 18.5) return Colors.orange;
-        if (val <= 25.0) return Colors.green.shade700;
-        return Colors.red;
-      case 'PGC':
-        if (val < 8.0) return Colors.orange;
-        if (val <= 19.9) return Colors.green.shade700;
-        return Colors.red;
-      case 'PME':
-        if (val < 33.3) return Colors.orange;
-        if (val <= 39.9) return Colors.green.shade700;
-        return Colors.red;
-      case 'GV':
-        if (val < 5.0) return Colors.orange;
-        if (val <= 9.0) return Colors.green.shade700;
-        return Colors.red;
-      default:
-        return Colors.black87;
-    }
+  Widget _buildSection(String title, IconData icon, List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        leading: Icon(icon, color: const Color(0xFF3B82F6)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+        children: [Padding(padding: const EdgeInsets.only(bottom: 12), child: Column(children: children))],
+      ),
+    );
   }
 
   Widget _buildIdealValuesCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.teal.shade700, borderRadius: BorderRadius.circular(20)),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: const Color(0xFF00695C), borderRadius: BorderRadius.circular(20)),
       child: Column(
         children: [
-          const Row(children: [Icon(Icons.star, color: Colors.white, size: 18), SizedBox(width: 8), Text('VALORES IDEAIS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]),
-          const SizedBox(height: 12),
+          const Row(children: [Icon(Icons.star, color: Colors.white, size: 18), SizedBox(width: 10), Text('VALORES IDEAIS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]),
+          const SizedBox(height: 15),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildIdealItem('IMC', '18.5-25'),
-              _buildIdealItem('PGC', '8-19.9'),
-              _buildIdealItem('PME', '33.3-39.9'),
-              _buildIdealItem('GV', '5-9'),
+              _idealItem('IMC', '18.5-25'),
+              _idealItem('PGC', '8-19.9'),
+              _idealItem('PME', '33.3-39.9'),
+              _idealItem('GV', '5-9'),
             ],
           )
         ],
@@ -378,7 +467,33 @@ class _AssessmentPageState extends State<AssessmentPage> {
     );
   }
 
-  Widget _buildIdealItem(String label, String range) {
-    return Column(children: [Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)), Text(range, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))]);
+  Widget _idealItem(String label, String value) {
+    return Column(children: [
+      Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+      Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+    ]);
+  }
+
+  // BOTÃO COM COR darkBlue
+  Widget _buildEvolutionButton(Color color) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)]
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showEvolutionCharts,
+          borderRadius: BorderRadius.circular(20),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.auto_graph, color: Colors.white), SizedBox(width: 12), Text('VER MINHA EVOLUÇÃO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.1))]),
+          ),
+        ),
+      ),
+    );
   }
 }

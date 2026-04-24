@@ -15,7 +15,7 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
   final DatabaseService _db = DatabaseService();
   final NotificationService _notifications = NotificationService();
   bool _isLoading = false;
-  bool _isDataLoaded = false;
+  bool _isEditing = false;
 
   final List<Map<String, dynamic>> _defaultSchedules = [
     {'id': 1, 'name': 'Café da Manhã', 'hour': 5, 'minute': 30},
@@ -31,7 +31,6 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
   @override
   void initState() {
     super.initState();
-    // Inicia com os padrões
     _currentSchedules = List.from(_defaultSchedules.map((item) => Map<String, dynamic>.from(item)));
     _loadSchedulesFromDb();
   }
@@ -46,7 +45,6 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
           _currentSchedules = List<Map<String, dynamic>>.from(
             dbSchedules.map((item) => Map<String, dynamic>.from(item))
           );
-          _isDataLoaded = true;
         });
       }
     }
@@ -74,24 +72,28 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
       await _db.saveMealSchedule(_currentSchedules);
       await _notifications.scheduleCustomNotifications(_currentSchedules);
       if (mounted) {
+        setState(() { _isEditing = false; _isLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Horários salvos e notificações agendadas!')),
+          SnackBar(
+            content: const Text('Agenda atualizada com sucesso!', textAlign: TextAlign.center),
+            backgroundColor: Colors.teal.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
         );
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const Color primaryColor = Color(0xFF00796B);
-    const Color bgSoft = Color(0xFFF0F4F8);
+    const Color primaryColor = Colors.red ;
+    const Color bgSoft = Color(0xFF8B0000);
 
     return Scaffold(
       backgroundColor: bgSoft,
@@ -102,13 +104,24 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
             pinned: true,
             backgroundColor: primaryColor,
             elevation: 0,
-            leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+            leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black87), onPressed: () => Navigator.pop(context)),
+            actions: [
+              if (!_isEditing) 
+                IconButton(icon: const Icon(Icons.edit, color: Colors.black87), onPressed: () => setState(() => _isEditing = true))
+              else 
+                IconButton(
+                  icon: _isLoading 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.black87, strokeWidth: 2)) 
+                    : const Icon(Icons.check, color: Colors.black87, size: 28), 
+                  onPressed: _isLoading ? null : _saveSchedules
+                ),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               centerTitle: true,
-              title: const Text('Agenda de Refeições', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              title: const Text('Agenda de Alarmes', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18)),
               background: Container(
                 decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryColor, Color(0xFF009688)]),
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryColor, Color(0xFF8B0000)]),
                 ),
               ),
             ),
@@ -130,40 +143,36 @@ class _MealSchedulePageState extends State<MealSchedulePage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                       leading: Container(
                         padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: Colors.teal.withOpacity(0.1), shape: BoxShape.circle),
-                        child: const Icon(Icons.alarm, color: Colors.teal, size: 24),
+                        decoration: BoxDecoration(color: primaryColor.withOpacity(0.2), shape: BoxShape.circle),
+                        child: const Icon(Icons.alarm, color: Color(0xFFB8860B), size: 24),
                       ),
-                      title: Text(meal['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      subtitle: const Text('Toque para editar o horário', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      trailing: Text(
-                        '${meal['hour'].toString().padLeft(2, '0')}:${meal['minute'].toString().padLeft(2, '0')}',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
+                      title: _isEditing 
+                        ? TextField(
+                            onChanged: (val) => _currentSchedules[index]['name'] = val,
+                            controller: TextEditingController(text: meal['name']),
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: 'Nome do Alarme'),
+                          )
+                        : Text(meal['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      subtitle: Text(_isEditing ? 'Toque no horário para mudar' : 'Aviso programado', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      trailing: GestureDetector(
+                        onTap: () => _selectTime(index),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _isEditing ? primaryColor.withOpacity(0.2) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${meal['hour'].toString().padLeft(2, '0')}:${meal['minute'].toString().padLeft(2, '0')}',
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFB8860B)),
+                          ),
+                        ),
                       ),
-                      onTap: () => _selectTime(index),
                     ),
                   );
                 },
                 childCount: _currentSchedules.length,
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _saveSchedules,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    elevation: 4,
-                  ),
-                  child: _isLoading 
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('SALVAR E ATIVAR AVISOS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ),
               ),
             ),
           ),

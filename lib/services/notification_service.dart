@@ -9,13 +9,17 @@ class NotificationService {
 
   Future<void> initNotification() async {
     tz.initializeTimeZones();
-    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/launcher_icon');
-    const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
-    
+    // Certifique-se de que o ícone @mipmap/launcher_icon existe no seu projeto Android
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@mipmap/launcher_icon');
+
+    const InitializationSettings initializationSettings =
+    InitializationSettings(android: initializationSettingsAndroid);
+
     await notificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Lógica para quando clicar em "Desativar" ou na notificação
+        // Lógica para quando clicar em "Desativar" na barra de notificação
         if (response.actionId == 'dismiss_alarm') {
           notificationsPlugin.cancel(response.id!);
         }
@@ -35,48 +39,59 @@ class NotificationService {
     }
   }
 
-  Future<void> scheduleWaterReminders() async {
-    for(int i = 100; i < 120; i++) {
+  /// REGRA: Agenda as 4 notificações diárias de água baseadas na meta total
+  /// Esta função deve ser chamada na Home sempre que a meta de água mudar.
+  Future<void> scheduleWaterReminders(double dailyTotal) async {
+    // Cancela lembretes de água antigos (IDs 200 a 205) para evitar duplicatas
+    for (int i = 200; i < 205; i++) {
       await notificationsPlugin.cancel(i);
     }
 
-    final List<Map<String, dynamic>> waterSchedule = [
-      {'h': 7, 'm': 30, 'msg': 'Bom dia! Comece seu 1º litro do dia. 💧'},
-      {'h': 9, 'm': 45, 'msg': 'Meio da manhã! Continue hidratando para bater 1L até meio-dia.'},
-      {'h': 11, 'm': 30, 'msg': 'Quase lá! Falta pouco para completar seu 1º litro!'},
-      {'h': 13, 'm': 15, 'msg': 'Hora de começar o 2º litro! Vamos lá? 🌊'},
-      {'h': 14, 'm': 40, 'msg': 'Reta final do 2º litro! Não esqueça de beber agora.'},
-      {'h': 15, 'm': 45, 'msg': '3º litro iniciado! Mantenha o foco na hidratação. 🧊'},
-      {'h': 17, 'm': 15, 'msg': 'Hora da água! O 3º litro está quase batido.'},
-      {'h': 18, 'm': 15, 'msg': 'Finalizando o período da tarde. Garanta seu 3º litro!'},
-      {'h': 19, 'm': 30, 'msg': 'Iniciando o último litro do dia! 🌑'},
-      {'h': 21, 'm': 00, 'msg': 'Quase batendo a meta diária de 4L! Beba um copo agora.'},
-      {'h': 21, 'm': 45, 'msg': 'Último gole do dia! Meta de 4L concluída? Parabéns! 🎉'},
+    // Calcula a quantidade por turno (Meta Total / 4 períodos)
+    double portion = dailyTotal / 4;
+
+    // Define os horários de disparo e os textos dos períodos
+    final List<Map<String, dynamic>> waterSlots = [
+      {'id': 200, 'h': 7, 'm': 0, 'period': '07:00 - 12:00'},
+      {'id': 201, 'h': 13, 'm': 0, 'period': '13:00 - 15:00'},
+      {'id': 202, 'h': 15, 'm': 0, 'period': '15:00 - 18:30'},
+      {'id': 203, 'h': 18, 'm': 30, 'period': '18:30 - 22:00'},
     ];
 
-    for (int i = 0; i < waterSchedule.length; i++) {
-      final item = waterSchedule[i];
+    for (var slot in waterSlots) {
+      final String timeStr = '${slot['h'].toString().padLeft(2, '0')}:${slot['m'].toString().padLeft(2, '0')}';
+
       await notificationsPlugin.zonedSchedule(
-        100 + i,
-        'Meta de Água Reedu 💧',
-        item['msg'],
-        _nextInstanceOfTime(item['h'], item['m']),
+        slot['id'],
+        'Próximo alarme: $timeStr', // Título similar à imagem enviada
+        'Beber ${portion.toStringAsFixed(1)}L de água (${slot['period']})',
+        _nextInstanceOfTime(slot['h'], slot['m']),
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'water_precision_channel', 'Metas de Água',
-            channelDescription: 'Lembretes precisos por volume e horário',
+            'water_reminders_channel', 'Lembretes de Água',
+            channelDescription: 'Notificações diárias para bater a meta de água',
             importance: Importance.max,
             priority: Priority.high,
-            color: Color(0xFF2196F3),
+            category: AndroidNotificationCategory.alarm, // Estilo Alarme
+            visibility: NotificationVisibility.public,
+            color: Color(0xFF2196F3), // Azul sugestivo
+            actions: <AndroidNotificationAction>[
+              AndroidNotificationAction(
+                'dismiss_alarm',
+                'Desativar',
+                cancelNotification: true,
+              ),
+            ],
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
+        matchDateTimeComponents: DateTimeComponents.time, // REPETIÇÃO DIÁRIA
       );
     }
   }
 
+  /// Agenda notificações customizadas de refeições (mantendo lógica anterior)
   Future<void> scheduleCustomNotifications(List<Map<String, dynamic>> schedules) async {
     for(int i = 1; i < 100; i++) {
       await notificationsPlugin.cancel(i);
@@ -89,9 +104,6 @@ class NotificationService {
       final int minute = meal['minute'];
       final String timeStr = '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
 
-      DateTime mealTime = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, hour, minute);
-      
-      // Agenda exatamente para o horário (ou 10 min antes se preferir, mas para parecer alarme usamos o horário real)
       await notificationsPlugin.zonedSchedule(
         id,
         'Próximo alarme: $timeStr',
@@ -99,18 +111,12 @@ class NotificationService {
         _nextInstanceOfTime(hour, minute),
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'reedu_alarm_channel', 'Alarmes de Refeição',
-            channelDescription: 'Notificações estilo sistema para refeições',
+            'reedu_meal_channel', 'Alarmes de Refeição',
             importance: Importance.max,
             priority: Priority.high,
             category: AndroidNotificationCategory.alarm,
-            visibility: NotificationVisibility.public,
             actions: <AndroidNotificationAction>[
-              AndroidNotificationAction(
-                'dismiss_alarm',
-                'Desativar',
-                cancelNotification: true,
-              ),
+              AndroidNotificationAction('dismiss_alarm', 'Desativar', cancelNotification: true),
             ],
           ),
         ),
@@ -124,7 +130,7 @@ class NotificationService {
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
     tz.TZDateTime scheduledDate = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
-    
+
     if (scheduledDate.isBefore(now)) {
       scheduledDate = scheduledDate.add(const Duration(days: 1));
     }
