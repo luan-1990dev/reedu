@@ -22,24 +22,5 @@ O **Reedu** é um aplicativo completo de acompanhamento nutricional desenvolvido
 - **PDF Engine:** syncfusion_flutter_pdf
 - **Notificações:** flutter_local_notifications
 
-## 📸 Screenshots
-*(Adicione aqui links para suas imagens após o upload)*
-
-## 🚀 Como Executar o Projeto
-
-1. Certifique-se de ter o Flutter instalado em sua máquina.
-2. Clone este repositório:
-   ```bash
-   git clone https://github.com/SEU_USUARIO/reedu.git
-   ```
-3. Instale as dependências:
-   ```bash
-   flutter pub get
-   ```
-4. Execute o app:
-   ```bash
-   flutter run
-   ```
-
----
+  
 Desenvolvido com foco em alta performance e design moderno.
