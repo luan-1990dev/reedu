@@ -53,7 +53,7 @@ android {
         targetSdk = 36
 
         // versionCode 14 para evitar erro de versão duplicada no Firebase/Play Store
-        versionCode = 16
+        versionCode = 17
         versionName = "1.0.4"
     }
 
