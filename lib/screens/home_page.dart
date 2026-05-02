@@ -179,8 +179,8 @@ class _HomePageState extends State<HomePage> {
             elevation: 0,
             actions: [
               IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.redAccent),
-                  onPressed: () => AuthService().signOut()
+                icon: const Icon(Icons.logout, color: Colors.redAccent),
+                onPressed: () => AuthService().signOut(),
               ),
             ],
             flexibleSpace: FlexibleSpaceBar(
@@ -241,11 +241,7 @@ class _HomePageState extends State<HomePage> {
                               weightSpots.add(FlSpot(chartIndex.toDouble(), weight));
 
                               var timestamp = docs[i]['timestamp'] as Timestamp?;
-                              if (timestamp != null) {
-                                weightDates.add(DateFormat('dd/MM').format(timestamp.toDate()));
-                              } else {
-                                weightDates.add('');
-                              }
+                              weightDates.add(timestamp != null ? DateFormat('dd/MM').format(timestamp.toDate()) : '');
                               chartIndex++;
                             }
                           }
@@ -265,10 +261,7 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 10),
                               _buildChecklist(mealChecks),
                               const SizedBox(height: 25),
-
-                              // GRÁFICO MODERNO AQUI
                               _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
-
                               const SizedBox(height: 25),
                               _buildWaterPanel(waterTarget, portionPerSlot, intervals, waterChecks),
                               const SizedBox(height: 40),
@@ -286,8 +279,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  // --- MÉTODOS DE UI (GRÁFICO MODERNO) ---
 
   Widget _buildWeightSection(Color color, List<FlSpot> spots, List<String> dates) {
     return Column(children: [
@@ -313,13 +304,13 @@ class _HomePageState extends State<HomePage> {
       ]),
       const SizedBox(height: 10),
       Container(
-        height: 220, // Um pouco mais alto para o visual clean
+        height: 220,
         decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(25),
             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 15)]
         ),
-        padding: const EdgeInsets.fromLTRB(5, 25, 20, 10),
+        padding: const EdgeInsets.fromLTRB(10, 20, 20, 10),
         child: spots.isEmpty
             ? const Center(child: Text("Sem dados"))
             : LineChart(LineChartData(
@@ -335,7 +326,7 @@ class _HomePageState extends State<HomePage> {
               }).toList(),
             ),
           ),
-          gridData: const FlGridData(show: false), // Remove as linhas de grade para ficar moderno
+          gridData: const FlGridData(show: false),
           titlesData: FlTitlesData(
             leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -351,7 +342,7 @@ class _HomePageState extends State<HomePage> {
                   if (index >= 0 && index < dates.length) {
                     return SideTitleWidget(
                       meta: meta,
-                      space: 10,
+                      space: 8,
                       child: Text(dates[index], style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
                     );
                   }
@@ -366,9 +357,8 @@ class _HomePageState extends State<HomePage> {
               spots: spots,
               isCurved: true,
               curveSmoothness: 0.35,
-              color: Colors.black, // Linha principal preta
+              color: Colors.black,
               barWidth: 4,
-              isStrokeCapRound: true,
               dotData: FlDotData(
                 show: true,
                 getDotPainter: (spot, percent, barData, index) {
@@ -381,16 +371,11 @@ class _HomePageState extends State<HomePage> {
                   return FlDotCirclePainter(radius: 5, color: dotColor, strokeWidth: 2, strokeColor: Colors.white);
                 },
               ),
-              // EFEITO MODERNO: Gradiente abaixo da linha
               belowBarData: BarAreaData(
                 show: true,
                 gradient: LinearGradient(
-                  colors: [
-                    Colors.black.withOpacity(0.1),
-                    Colors.black.withOpacity(0.0),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+                  colors: [Colors.black.withOpacity(0.1), Colors.black.withOpacity(0.0)],
+                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
                 ),
               ),
             )
@@ -400,8 +385,6 @@ class _HomePageState extends State<HomePage> {
     ]);
   }
 
-  // --- MANTENDO OS OUTROS MÉTODOS AUXILIARES ---
-
   Widget _buildWaterPanel(double waterTarget, String portionPerSlot, List<String> intervals, Map waterChecks) {
     const Color waterBlue = Color(0xFF0288D1);
     return Container(
@@ -410,8 +393,7 @@ class _HomePageState extends State<HomePage> {
       decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF03A9F4), waterBlue],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(30),
           boxShadow: [BoxShadow(color: waterBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]
