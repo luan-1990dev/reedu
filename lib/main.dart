@@ -3,16 +3,28 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/login_page.dart';
 import 'screens/home_page.dart';
 import 'services/notification_service.dart';
+import '../services/database_service.dart'; // Garanta que este caminho para o DatabaseService esteja correto
+import 'package:intl/date_symbol_data_local.dart';
+
+// FUNÇÃO TOP-LEVEL PARA MENSAGENS EM SEGUNDO PLANO (Obrigatório)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  debugPrint("Mensagem recebida em segundo plano: ${message.notification?.title}");
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // MODO IMERSIVO TOTAL
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Inicializa a formatação de datas para português do Brasil
+  await initializeDateFormatting('pt_BR', null);
 
+  // MODO IMERSIVO TOTAL E ESTILO DO SISTEMA
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
@@ -24,21 +36,34 @@ void main() async {
   bool firebaseInitialized = false;
 
   try {
-    // Inicialização segura do Firebase
+    // 1. INICIALIZA O FIREBASE
     await Firebase.initializeApp();
     firebaseInitialized = true;
+
+    // 2. CONFIGURA O HANDLER DE SEGUNDO PLANO
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // 3. INICIALIZA AS NOTIFICAÇÕES LOCAIS E PUSH
+    final notificationService = NotificationService();
+    await notificationService.initNotification();
+    await notificationService.setupPushNotifications();
+
   } catch (e) {
-    debugPrint("ERRO na inicialização do Firebase: $e");
+    debugPrint("ERRO Crítico na inicialização: $e");
   }
 
   runApp(MyApp(isFirebaseReady: firebaseInitialized));
 }
 
-// Função atualizada para buscar a meta de água e agendar as notificações
+// CORREÇÃO: Função unificada, limpa e com escopo corrigido
 Future<void> _setupNotificationsSafe() async {
   try {
     final notificationService = NotificationService();
     await notificationService.initNotification();
+
+    // Executa a manutenção e limpeza de dados antigos de forma limpa
+    final DatabaseService db = DatabaseService();
+    await db.clearOldNotifications();
 
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -46,14 +71,11 @@ Future<void> _setupNotificationsSafe() async {
 
       if (doc.exists) {
         final data = doc.data()!;
-
-        // 1. Busca a meta de água (se não existir, assume 4.0 como padrão)
         final double waterTarget = (data['waterTarget'] ?? 4.0).toDouble();
 
-        // 2. Agenda as notificações de água passando o parâmetro esperado
+        // Agenda as rotinas do usuário
         await notificationService.scheduleWaterReminders(waterTarget);
 
-        // 3. Agenda as notificações de refeição se existirem
         if (data.containsKey('meal_schedules')) {
           final List<dynamic> schedules = data['meal_schedules'];
           await notificationService.scheduleCustomNotifications(
@@ -61,12 +83,12 @@ Future<void> _setupNotificationsSafe() async {
           );
         }
       } else {
-        // Caso o usuário ainda não tenha documento, agenda com o padrão de 4L
+        // Fallback para usuários novos sem documento criado
         await notificationService.scheduleWaterReminders(4.0);
       }
     }
   } catch (e) {
-    debugPrint("Erro silencioso em notificações: $e");
+    debugPrint("Aviso: Falha ao carregar agendamentos automáticos: $e");
   }
 }
 
@@ -76,7 +98,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dispara a configuração de notificações após o primeiro frame para não travar o splash
+    // Dispara a configuração de notificações após o primeiro frame para não travar a abertura
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (isFirebaseReady) _setupNotificationsSafe();
     });
@@ -89,9 +111,10 @@ class MyApp extends StatelessWidget {
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1967D2)),
           useMaterial3: true,
+          fontFamily: 'Roboto',
         ),
         home: !isFirebaseReady
-            ? const Scaffold(body: Center(child: Text("Erro de conexão. Verifique a internet.")))
+            ? const Scaffold(body: Center(child: Text("Falha ao conectar com o servidor.")))
             : StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
           builder: (context, snapshot) {

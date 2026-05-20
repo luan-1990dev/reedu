@@ -9,6 +9,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Carregamento das propriedades da chave (key.properties)
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -17,67 +18,68 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.luan1990dev.reedu"
-    // Compile SDK 35 é o padrão estável atual para Android 15
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Necessário para as notificações e APIs de tempo (java.time)
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    signingConfigs {
-        getByName("debug") {
-            if (keystoreProperties.isNotEmpty()) {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-            }
-        }
-        create("release") {
-            if (keystoreProperties.isNotEmpty()) {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-            }
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 
     defaultConfig {
         applicationId = "com.luan1990dev.reedu"
-        // Definido manualmente para 21 para evitar erros de plugins
         minSdk = flutter.minSdkVersion
-        targetSdk = 36
+        targetSdk = 35
 
-        // versionCode 14 para evitar erro de versão duplicada no Firebase/Play Store
-        versionCode = 17
-        versionName = "1.0.4"
+        // DICA: Lembre-se de aumentar o versionCode para cada novo envio ao Google
+        versionCode = 27
+        versionName = "1.0.8"
+
+        multiDexEnabled = true
+    }
+
+    // CONFIGURAÇÃO DE ASSINATURA (ADICIONADO)
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+        }
     }
 
     buildTypes {
+        // CONFIGURAÇÃO DE LANÇAMENTO AJUSTADA
         getByName("release") {
-            signingConfig = if (keystoreProperties.isNotEmpty()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Define a assinatura de produção criada acima
+            signingConfig = signingConfigs.getByName("release")
+
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
 
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
+flutter {
+    source = "../.."
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
-    implementation(platform("com.google.firebase:firebase-bom:34.11.0"))
-}
+    // Essencial para o agendamento de alarmes precisos
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
-flutter {
-    source = "../.."
+    // Firebase BoM
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
 }

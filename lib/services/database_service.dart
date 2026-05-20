@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -48,7 +49,6 @@ class DatabaseService {
     return null;
   }
 
-  /// MÉTODO DE SALVAMENTO: Garante o formato numérico e timestamp
   Future<void> saveAssessment(Map<String, dynamic> data) async {
     final uid = _currentUid;
     if (uid == null) return;
@@ -164,7 +164,7 @@ class DatabaseService {
     }
   }
 
-  // --- NOVOS MÉTODOS DE ÁGUA POR TURNO ---
+  // --- MÉTODOS DE ÁGUA POR TURNO ---
 
   Future<void> updateWaterSlotAmount(String slotKey, String amount) async {
     final uid = _currentUid;
@@ -195,30 +195,60 @@ class DatabaseService {
     });
   }
 
-  // --- MÉTODOS GERAIS DE ÁGUA ---
+  // --- MÉTODOS GERAIS DE ÁGUA (UNIFICADOS) ---
 
-  Future<void> addWater([double amount = 0.25]) async {
+  Future<void> addWaterConsumption(String period, double amount) async {
     final uid = _currentUid;
     if (uid == null) return;
-    String today = DateTime.now().toIso8601String().split('T')[0];
-    DocumentReference waterDoc = _db.collection('users').doc(uid).collection('daily_stats').doc(today);
 
-    await _db.runTransaction((transaction) async {
-      DocumentSnapshot snapshot = await transaction.get(waterDoc);
-      double current = snapshot.exists ? (snapshot.data() as Map<String, dynamic>)['water'] ?? 0.0 : 0.0;
-      transaction.set(waterDoc, {'water': current + amount}, SetOptions(merge: true));
-    });
+    // Gera a data no formato yyyy-MM-dd
+    final String hoje = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    // Referência para o documento do dia na coleção daily_stats
+    final docRef = _db.collection('users').doc(uid).collection('daily_stats').doc(hoje);
+
+    // LÓGICA DE CALCULADORA: incrementa o valor atual com a nova quantidade
+    await docRef.set({
+      'water_checks': {
+        period: FieldValue.increment(amount),
+      }
+    }, SetOptions(merge: true));
   }
 
   Future<void> setWaterTotal(double total) async {
+    if (_currentUid == null) return;
     String today = DateTime.now().toIso8601String().split('T')[0];
     await _db.collection('users').doc(_currentUid).collection('daily_stats').doc(today).set({'water': total}, SetOptions(merge: true));
   }
 
   Future<void> updateProfilePicture(String url) async {
+    if (_currentUid == null) return;
     await _db.collection('users').doc(_currentUid).set({'photoUrl': url}, SetOptions(merge: true));
   }
 
+  // --- LIMPEZA DE HISTÓRICO (NOTIFICAÇÕES ANTERIORES A HOJE) ---
+  Future<void> clearOldNotifications() async {
+    final uid = _currentUid;
+    if (uid == null) return;
+
+    // Pega o início do dia de hoje (00:00:00)
+    DateTime now = DateTime.now();
+    DateTime todayStart = DateTime(now.year, now.month, now.day);
+
+    final historyRef = _db.collection('users').doc(uid).collection('notifications_history');
+
+    // Busca todas as notificações onde o timestamp é menor que o início de hoje
+    final oldNotifications = await historyRef
+        .where('timestamp', isLessThan: todayStart)
+        .get();
+
+    final batch = _db.batch();
+    for (var doc in oldNotifications.docs) {
+      batch.delete(doc.reference);
+    }
+
+    await batch.commit();
+  }
   // --- STREAMS ---
 
   Stream<QuerySnapshot> get weightHistory {
@@ -230,6 +260,15 @@ class DatabaseService {
         .snapshots();
   }
 
-  Stream<DocumentSnapshot> get todayStats => _db.collection('users').doc(_currentUid).collection('daily_stats').doc(DateTime.now().toIso8601String().split('T')[0]).snapshots();
-  Stream<DocumentSnapshot> get userProfileStream => _db.collection('users').doc(_currentUid).snapshots();
+  Stream<DocumentSnapshot> get todayStats => _db
+      .collection('users')
+      .doc(_currentUid)
+      .collection('daily_stats')
+      .doc(DateTime.now().toIso8601String().split('T')[0])
+      .snapshots();
+
+  Stream<DocumentSnapshot> get userProfileStream => _db
+      .collection('users')
+      .doc(_currentUid)
+      .snapshots();
 }
