@@ -7,6 +7,7 @@ plugins {
     id("kotlin-android")
     id("com.google.gms.google-services")
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.firebase.crashlytics")
 }
 
 // Carregamento das propriedades da chave (key.properties)
@@ -40,7 +41,7 @@ android {
         targetSdk = 35
 
         // DICA: Lembre-se de aumentar o versionCode para cada novo envio ao Google
-        versionCode = 27
+        versionCode = 28
         versionName = "1.0.8"
 
         multiDexEnabled = true
@@ -79,7 +80,6 @@ flutter {
 dependencies {
     // Essencial para o agendamento de alarmes precisos
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-
-    // Firebase BoM
     implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-crashlytics")
 }
