@@ -299,9 +299,11 @@ class _HomePageState extends State<HomePage> {
 
               IconButton(
                   icon: const Icon(Icons.logout, color: Colors.redAccent),
-                  onPressed: () => AuthService().signOut()
-              ),
-            ],
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                  }
+    ),
+    ]
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -467,19 +469,65 @@ class _HomePageState extends State<HomePage> {
   Widget _buildWaterPanel(double target, List<String> intervals, Map checks, Color color) {
     final String portion = "${(target / 4).toStringAsFixed(1)}L";
     return Container(
-      width: double.infinity, padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFF03A9F4), Color(0xFF0288D1)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: const Color(0xFF0288D1).withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]),
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [Color(0xFF03A9F4), Color(0xFF0288D1)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+                color: const Color(0xFF0288D1).withOpacity(0.3),
+                blurRadius: 15,
+                offset: const Offset(0, 8))
+          ]),
       child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(children: [const Icon(Icons.water_drop, color: Colors.white, size: 20), const SizedBox(width: 10), Text('METAS DE ÁGUA (${target.toStringAsFixed(1)}L)', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))]),
-          GestureDetector(onTap: () => _showEditDailyWaterGoalDialog(target, intervals), child: const Icon(Icons.edit, color: Colors.white70, size: 20)),
+          Row(children: [
+            const Icon(Icons.water_drop, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Text('METAS DE ÁGUA (${target.toStringAsFixed(1)}L)',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14))
+          ]),
+          GestureDetector(
+              onTap: () => _showEditDailyWaterGoalDialog(target, intervals),
+              child: const Icon(Icons.edit, color: Colors.white70, size: 20)),
         ]),
         const SizedBox(height: 20),
-        ...intervals.map((time) => Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text(time, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-          GestureDetector(onTap: () => _db.toggleWaterSlot(time, !(checks[time] ?? false)), child: Icon(((checks[time] ?? 0) > 0) ? Icons.check_circle : Icons.radio_button_unchecked, color: Colors.white, size: 26)),
-          Text(portion, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-        ]))),
+        ...intervals.map((time) {
+          // LÓGICA HÍBRIDA: Aceita bool (legado) ou num (novo/calculadora)
+          final bool isChecked = (checks[time] == true || (checks[time] is num && checks[time] > 0));
+
+          return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(time,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500)),
+                    GestureDetector(
+                      onTap: () => _db.toggleWaterSlot(time, !isChecked),
+                      child: Icon(
+                        isChecked ? Icons.check_circle : Icons.radio_button_unchecked,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    ),
+                    Text(portion,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14)),
+                  ]));
+        }),
       ]),
     );
   }

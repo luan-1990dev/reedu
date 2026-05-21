@@ -126,12 +126,13 @@ class NotificationService {
       title: title,
       body: body,
       type: 'Sistema',
+      horarioFiltro: "",
     );
   }
 
 
   // --- SALVAR NO HISTÓRICO (SINO DA HOME) ---
-  Future<void> _saveToHistory({required String id, required String title, required String body, required String type}) async {
+  Future<void> _saveToHistory({required String id, required String title, required String body, required String type, required String horarioFiltro,}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -144,6 +145,7 @@ class NotificationService {
       'title': title,
       'body': body,
       'timestamp': FieldValue.serverTimestamp(),
+      'horarioFiltro': horarioFiltro,
       'type': type,
       'isRead': false,
     }, SetOptions(merge: true));
@@ -178,7 +180,7 @@ class NotificationService {
         matchDateTimeComponents: DateTimeComponents.time,
       );
 
-      _saveToHistory(id: "meal_${meal['id']}_$hojeStr", title: title, body: body, type: 'Refeição');
+      _saveToHistory(id: "meal_${meal['id']}_$hojeStr", title: title, body: body, type: 'Refeição', horarioFiltro: "",);
     }
   }
 
@@ -209,7 +211,7 @@ class NotificationService {
       matchDateTimeComponents: DateTimeComponents.time,
     );
 
-    _saveToHistory(id: "resumo_${DateFormat('yyyy-MM-dd').format(DateTime.now())}", title: "Resumo do seu dia anterior 📊", body: fullMessage, type: 'Resumo');
+    _saveToHistory(id: "resumo_${DateFormat('yyyy-MM-dd').format(DateTime.now())}", title: "Resumo do seu dia anterior 📊", body: fullMessage, type: 'Resumo', horarioFiltro: "08:15",);
   }
 
   // --- ÁGUA ---
@@ -234,7 +236,7 @@ class NotificationService {
       {'id': 211, 'h': 17, 'm': 30, 'type': 'ask', 'period': '15:00 - 18:30', 'msg': 'Mais um copo de água!'},
       {'id': 212, 'h': 18, 'm': 30, 'type': 'end', 'period': '15:00 - 18:30', 'msg': 'Fim do ciclo da tarde.'},
       {'id': 213, 'h': 19, 'm': 00, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Início do ciclo da noite! A meta é: ${targetPerCycle.toStringAsFixed(1)}L'},
-      {'id': 214, 'h': 20, 'm': 00, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Não esqueça da água!'},
+      {'id': 214, 'h': 22, 'm': 00, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Não esqueça da água!'},
       {'id': 215, 'h': 21, 'm': 00, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Essa é a hidratação final!'},
       {'id': 216, 'h': 22, 'm': 00, 'type': 'end', 'period': '18:30 - 22:00', 'msg': 'Fim do ciclo da noite. Bom descanso!'},
     ];
@@ -252,7 +254,7 @@ class NotificationService {
         matchDateTimeComponents: DateTimeComponents.time,
       );
 
-      _saveToHistory(id: "agua_${alarm['id']}_$hojeStr", title: title, body: alarm['msg'], type: 'Água');
+      _saveToHistory(id: "agua_${alarm['id']}_$hojeStr", title: title, body: alarm['msg'], type: 'Água', horarioFiltro: "",);
     }
   }
 

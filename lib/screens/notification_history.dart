@@ -31,7 +31,7 @@ class NotificationHistoryPage extends StatelessWidget {
             .collection('users')
             .doc(uid)
             .collection('notifications_history')
-            .orderBy('timestamp', descending: true)
+            .orderBy('horarioFiltro', descending: false)
             .limit(50) // Limita as últimas 50
             .snapshots(),
         builder: (context, snapshot) {
