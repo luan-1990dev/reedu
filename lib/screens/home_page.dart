@@ -1,11 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
-import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../services/diet_service.dart';
 import '../services/notification_service.dart';
@@ -16,7 +14,7 @@ import 'supplementation_page.dart';
 import 'menu_page.dart';
 import 'diet_page.dart';
 import 'weight_monthly_page.dart';
-import 'calendar_page.dart'; // IMPORTADO
+import 'calendar_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -57,81 +55,175 @@ class _HomePageState extends State<HomePage> {
     return "Usuário";
   }
 
-  void _showEditMealScheduleDialog(Map<String, dynamic>? profileData) {
-    final List<String> mealNames = ['Café da Manhã', 'Lanche da Manhã', 'Almoço', 'Lanche da Tarde 1', 'Lanche da Tarde 2', 'Jantar'];
-    final List<dynamic> currentSchedules = profileData?['meal_schedules'] ?? [];
+  void _showEditMealScheduleDialog(Map<String, dynamic>? profileData) {// 1. Carrega a lista do Firebase ou usa os padrões se estiver vazio
+    final List<dynamic> currentSchedules = profileData?['meal_schedules'] ?? [
+      {'id': 1, 'name': 'Café da Manhã', 'hour': 7, 'minute': 30},
+      {'id': 2, 'name': 'Lanche da Manhã', 'hour': 9, 'minute': 00},
+      {'id': 3, 'name': 'Almoço', 'hour': 12, 'minute': 30},
+      {'id': 4, 'name': 'Lanche da Tarde 1', 'hour': 17, 'minute': 00},
+      {'id': 5, 'name': 'Lanche da Tarde 2', 'hour': 18, 'minute': 00},
+      {'id': 6, 'name': 'Jantar', 'hour': 21, 'minute': 00},
+    ];
 
-    Map<String, TimeOfDay> tempSchedules = {};
-
-    for (var name in mealNames) {
-      final existing = currentSchedules.firstWhere((m) => m['name'] == name, orElse: () => null);
-      if (existing != null) {
-        tempSchedules[name] = TimeOfDay(hour: existing['hour'], minute: existing['minute']);
-      } else {
-        tempSchedules[name] = const TimeOfDay(hour: 08, minute: 00);
-      }
-    }
+    // 2. Criamos uma cópia mutável para manipular no diálogo
+    List<Map<String, dynamic>> tempSchedules = List.from(
+        currentSchedules.map((e) => Map<String, dynamic>.from(e))
+    );
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Horários das Refeições'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: mealNames.length,
-              itemBuilder: (context, index) {
-                final name = mealNames[index];
-                return ListTile(
-                  title: Text(name, style: const TextStyle(fontSize: 14)),
-                  trailing: TextButton(
-                    child: Text(tempSchedules[name]!.format(context), style: const TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () async {
-                      final time = await showTimePicker(
+        builder: (context, setDialogState) {
+          // Mantém sempre ordenado por horário para o usuário
+          tempSchedules.sort((a, b) =>
+              (a['hour'] * 60 + a['minute']).compareTo(b['hour'] * 60 + b['minute'])
+          );
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+            title: const Text('Horários das Refeições',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // LISTA DE REFEIÇÕES ATUAIS
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: tempSchedules.length,
+                      itemBuilder: (context, index) {
+                        final meal = tempSchedules[index];
+                        final time = TimeOfDay(hour: meal['hour'], minute: meal['minute']);
+
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
+                            onPressed: () {
+                              setDialogState(() => tempSchedules.removeAt(index));
+                            },
+                            tooltip: "Excluir horário",
+                          ),
+                          title: Text(meal['name'], style: const TextStyle(fontSize: 14)),
+                          trailing: TextButton(
+                            child: Text(
+                              time.format(context),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: Color(0xFF1967D2)
+                              ),
+                            ),
+                            onPressed: () async {
+                              final picked = await showTimePicker(
+                                  context: context,
+                                  initialTime: time
+                              );
+                              if (picked != null) {
+                                setDialogState(() {
+                                  tempSchedules[index]['hour'] = picked.hour;
+                                  tempSchedules[index]['minute'] = picked.minute;
+                                });
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const Divider(height: 30),
+
+                  // BOTÃO PARA ADICIONAR NOVO
+                  TextButton.icon(
+                    icon: const Icon(Icons.add_circle_outline, color: Colors.green),
+                    label: const Text("ADICIONAR REFEIÇÃO",
+                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)
+                    ),
+                    onPressed: () {
+                      final nameController = TextEditingController();
+                      showDialog(
                         context: context,
-                        initialTime: tempSchedules[name]!,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text("Nome da Refeição"),
+                          content: TextField(
+                            controller: nameController,
+                            autofocus: true,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: const InputDecoration(
+                              hintText: "Ex: Ceia, Pré-Treino...",
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text("CANCELAR")
+                            ),
+                            ElevatedButton(
+                              onPressed: () {
+                                if (nameController.text.isNotEmpty) {
+                                  setDialogState(() {
+                                    tempSchedules.add({
+                                      'id': DateTime.now().millisecondsSinceEpoch,
+                                      'name': nameController.text.trim(),
+                                      'hour': 12,
+                                      'minute': 0,
+                                    });
+                                  });
+                                  Navigator.pop(ctx);
+                                }
+                              },
+                              child: const Text("ADICIONAR"),
+                            ),
+                          ],
+                        ),
                       );
-                      if (time != null) {
-                        setDialogState(() => tempSchedules[name] = time);
-                      }
                     },
                   ),
-                );
-              },
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-            ElevatedButton(
-              onPressed: () async {
-                final List<Map<String, dynamic>> finalSchedules = tempSchedules.entries.map((e) {
-                  return {
-                    'id': tempSchedules.keys.toList().indexOf(e.key) + 1,
-                    'name': e.key,
-                    'hour': e.value.hour,
-                    'minute': e.value.minute,
-                  };
-                }).toList();
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('CANCELAR', style: TextStyle(color: Colors.red))
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1967D2),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 25)
+                ),
+                onPressed: () async {
+                  // 1. Salva a nova lista (completa) no Firestore
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser?.uid)
+                      .set({'meal_schedules': tempSchedules}, SetOptions(merge: true));
 
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(FirebaseAuth.instance.currentUser?.uid)
-                    .set({'meal_schedules': finalSchedules}, SetOptions(merge: true));
+                  // 2. Sincroniza as notificações locais (cancela as antigas e agenda as novas)
+                  await _notifications.scheduleCustomNotifications(tempSchedules);
 
-                await _notifications.scheduleCustomNotifications(finalSchedules);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Horários atualizados! 🍎"), backgroundColor: Colors.green, behavior: SnackBarBehavior.floating),
-                  );
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('SALVAR'),
-            ),
-          ],
-        ),
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text("Horarios das refeições atualizados!"),
+                          backgroundColor: Colors.green,
+                          behavior: SnackBarBehavior.floating
+                      ),
+                    );
+                    Navigator.pop(context);
+                  }
+                },
+                child: const Text('SALVAR'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -157,7 +249,6 @@ class _HomePageState extends State<HomePage> {
                 decoration: const InputDecoration(labelText: "Meta Diária (Litros)", suffixText: "L"),
               ),
               const SizedBox(height: 20),
-              const Text("Intervalos (Ex: 07:00 - 12:00):", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               ...List.generate(4, (index) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 10),
@@ -188,12 +279,7 @@ class _HomePageState extends State<HomePage> {
                   .set({'waterTarget': val, 'waterIntervals': newIntervals}, SetOptions(merge: true));
 
               await _notifications.scheduleWaterReminders(val);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Metas de água atualizadas! 💧"), backgroundColor: Colors.blue, behavior: SnackBarBehavior.floating),
-                );
-                Navigator.pop(context);
-              }
+              if (mounted) Navigator.pop(context);
             },
             child: const Text('SALVAR'),
           ),
@@ -238,7 +324,11 @@ class _HomePageState extends State<HomePage> {
 
     List<String> getOptions(String mealName) {
       if (customMenu != null && customMenu.containsKey(mealName) && customMenu[mealName].toString().isNotEmpty) {
-        return [customMenu[mealName].toString()];
+        String rawText = customMenu[mealName].toString();
+        if (rawText.contains('•')) {
+          return rawText.split('•').map((opt) => opt.trim()).where((opt) => opt.isNotEmpty).toList();
+        }
+        return [rawText];
       }
       return DietService.mealOptions[mealName] ?? ['Ver plano detalhado'];
     }
@@ -288,22 +378,14 @@ class _HomePageState extends State<HomePage> {
             actions: [
               IconButton(
                 icon: const Icon(Icons.notifications_on, color: Colors.orange),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const NotificationHistoryPage()),
-                  );
-                },
-                tooltip: "Historico de notificações",
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationHistoryPage())),
+                tooltip: "Histórico",
               ),
-
               IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.redAccent),
-                  onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                  }
-    ),
-    ]
+                icon: const Icon(Icons.logout, color: Colors.redAccent),
+                onPressed: () async => await FirebaseAuth.instance.signOut(),
+              ),
+            ],
           ),
           SliverToBoxAdapter(
             child: Padding(
@@ -315,9 +397,7 @@ class _HomePageState extends State<HomePage> {
                   final String displayName = _getDisplayName(profileData);
                   final nextMeal = _getNextMealInfo(profileData?['meal_schedules'], profileData?['menu']);
                   final double waterTarget = (profileData?['waterTarget'] ?? 4.0).toDouble();
-                  final List<String> waterIntervals = List<String>.from(profileData?['waterIntervals'] ?? [
-                    '07:00 - 12:00', '13:00 - 15:00', '15:00 - 18:30', '18:30 - 22:00'
-                  ]);
+                  final List<String> waterIntervals = List<String>.from(profileData?['waterIntervals'] ?? ['07:00 - 12:00', '13:00 - 15:00', '15:00 - 18:30', '18:30 - 22:00']);
 
                   if (_lastScheduledTarget != waterTarget) {
                     _lastScheduledTarget = waterTarget;
@@ -333,14 +413,8 @@ class _HomePageState extends State<HomePage> {
 
                       double totalBeberado = 0;
                       waterChecks.forEach((key, value) {
-                        if (value == true) totalBeberado += (waterTarget / 4);
+                        if (value == true || (value is num && value > 0)) totalBeberado += (waterTarget / 4);
                       });
-
-                      _notifications.scheduleDailySummary(
-                        waterTotal: totalBeberado,
-                        mealChecks: mealChecks,
-                        monthlyHistory: {},
-                      );
 
                       return StreamBuilder<QuerySnapshot>(
                         stream: _db.weightHistory,
@@ -394,19 +468,188 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // --- WIDGETS DE COMPONENTES ---
+
+  Widget _buildMealOptionCard({
+    required String optionText,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? Colors.white : Colors.white.withOpacity(0.3),
+            width: 1,
+          ),
+          boxShadow: isSelected
+              ? [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]
+              : [],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: isSelected ? const Color(0xFF00695C) : Colors.white70,
+              size: 24,
+            ),
+            const SizedBox(width: 15),
+            Expanded(
+              child: Text(
+                optionText,
+                style: TextStyle(
+                  color: isSelected ? const Color(0xFF374151) : Colors.white,
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionCard(Map meal, Map checks, Color color) {
+    final List<String> options = List<String>.from(meal['options']);
+    final dynamic currentMealStatus = checks[meal['key']];
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [color, color.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.2)),
+            Text(meal['time'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))
+          ]),
+          const SizedBox(height: 8),
+          Text(meal['title'], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 18),
+          ...options.map((opt) {
+            bool isThisSelected = currentMealStatus == opt;
+            return _buildMealOptionCard(
+              optionText: opt,
+              isSelected: isThisSelected,
+              onTap: () => _db.toggleMealCompletion(meal['key'], opt),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChecklist(Map checks) {
+    final m = ['cafe', 'lanche_m', 'almoco', 'lanche_t1', 'lanche_t2', 'jantar'];
+    final l = ['Café', 'Lanche M', 'Almoço', 'Lanche T1', 'Lanche T2', 'Jantar'];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: List.generate(m.length, (i) {
+          bool isDone = checks[m[i]] != null;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: Text(l[i], style: TextStyle(color: isDone ? Colors.white : Colors.black87)),
+              selected: isDone,
+              onSelected: (v) => _db.toggleMealCompletion(m[i], v ? "OK" : null),
+              selectedColor: const Color(0xFF00695C),
+              checkmarkColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildWaterPanel(double target, List<String> intervals, Map checks, Color color) {
+    final String portion = "${(target / 4).toStringAsFixed(1)}L";
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [Color(0xFF03A9F4), Color(0xFF0288D1)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [BoxShadow(color: const Color(0xFF0288D1).withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]),
+      child: Column(children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Row(children: [
+            const Icon(Icons.water_drop, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Text('METAS DE ÁGUA (${target.toStringAsFixed(1)}L)', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))
+          ]),
+          GestureDetector(onTap: () => _showEditDailyWaterGoalDialog(target, intervals), child: const Icon(Icons.edit, color: Colors.white70, size: 20)),
+        ]),
+        const SizedBox(height: 20),
+        ...intervals.map((time) {
+          final bool isChecked = (checks[time] == true || (checks[time] is num && checks[time] > 0));
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(time, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+              GestureDetector(
+                onTap: () => _db.toggleWaterSlot(time, !isChecked),
+                child: Icon(isChecked ? Icons.check_circle : Icons.radio_button_unchecked, color: Colors.white, size: 26),
+              ),
+              Text(portion, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+            ]),
+          );
+        }),
+      ]),
+    );
+  }
+
+  Widget _buildDietHeader(BuildContext ctx, Color color, Map<String, dynamic>? profileData) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const DietPage())),
+          child: Row(children: [
+            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(Icons.description_outlined, color: color, size: 24)),
+            const SizedBox(width: 15),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('PLANO ALIMENTAR', style: TextStyle(fontWeight: FontWeight.bold)), Text('Clique para ver detalhes', style: TextStyle(fontSize: 11, color: Colors.grey))]),
+          ]),
+        ),
+        const Spacer(),
+        IconButton(icon: Icon(Icons.edit, color: color, size: 20), onPressed: () => _showEditMealScheduleDialog(profileData)),
+        const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+      ]),
+    );
+  }
+
+  Widget _buildGreeting(String name, String? url, Color color) {
+    return Row(children: [
+      CircleAvatar(
+          radius: 25,
+          backgroundColor: color.withOpacity(0.1),
+          backgroundImage: (url != null && url.startsWith('http')) ? NetworkImage(url) : null,
+          child: url == null ? Text(name[0], style: TextStyle(fontWeight: FontWeight.bold, color: color)) : null),
+      const SizedBox(width: 12),
+      Text('Olá, $name! Foco hoje.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))
+    ]);
+  }
+
   Widget _buildHeaderMenu(BuildContext context) {
     return Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
       _buildHeaderIcon(icon: Icons.restaurant_menu, color: Colors.green, label: 'Cardápio', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MenuPage()))),
       _buildHeaderIcon(icon: Icons.medication, color: Colors.purple, label: 'Suplementos', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupplementationPage()))),
       _buildHeaderIcon(icon: Icons.kitchen, color: Colors.orange, label: 'Receitas', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipesPage()))),
       _buildHeaderIcon(icon: Icons.bar_chart, color: Colors.blue, label: 'Avaliação', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AssessmentPage()))),
-
-      _buildHeaderIcon(
-          icon: Icons.calendar_month,
-          color: Colors.indigo,
-          label: 'Calendário',
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CalendarPage()))
-      ),
+      _buildHeaderIcon(icon: Icons.calendar_month, color: Colors.indigo, label: 'Calendário', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CalendarPage()))),
     ]);
   }
 
@@ -464,106 +707,6 @@ class _HomePageState extends State<HomePage> {
         )),
       ),
     ]);
-  }
-
-  Widget _buildWaterPanel(double target, List<String> intervals, Map checks, Color color) {
-    final String portion = "${(target / 4).toStringAsFixed(1)}L";
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-          gradient: const LinearGradient(
-              colors: [Color(0xFF03A9F4), Color(0xFF0288D1)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight),
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [
-            BoxShadow(
-                color: const Color(0xFF0288D1).withOpacity(0.3),
-                blurRadius: 15,
-                offset: const Offset(0, 8))
-          ]),
-      child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(children: [
-            const Icon(Icons.water_drop, color: Colors.white, size: 20),
-            const SizedBox(width: 10),
-            Text('METAS DE ÁGUA (${target.toStringAsFixed(1)}L)',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14))
-          ]),
-          GestureDetector(
-              onTap: () => _showEditDailyWaterGoalDialog(target, intervals),
-              child: const Icon(Icons.edit, color: Colors.white70, size: 20)),
-        ]),
-        const SizedBox(height: 20),
-        ...intervals.map((time) {
-          // LÓGICA HÍBRIDA: Aceita bool (legado) ou num (novo/calculadora)
-          final bool isChecked = (checks[time] == true || (checks[time] is num && checks[time] > 0));
-
-          return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(time,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500)),
-                    GestureDetector(
-                      onTap: () => _db.toggleWaterSlot(time, !isChecked),
-                      child: Icon(
-                        isChecked ? Icons.check_circle : Icons.radio_button_unchecked,
-                        color: Colors.white,
-                        size: 26,
-                      ),
-                    ),
-                    Text(portion,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14)),
-                  ]));
-        }),
-      ]),
-    );
-  }
-
-  Widget _buildDietHeader(BuildContext ctx, Color color, Map<String, dynamic>? profileData) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
-      child: Row(children: [
-        GestureDetector(
-          onTap: () => Navigator.push(ctx, MaterialPageRoute(builder: (_) => const DietPage())),
-          child: Row(children: [
-            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(Icons.description_outlined, color: color, size: 24)),
-            const SizedBox(width: 15),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('PLANO ALIMENTAR', style: TextStyle(fontWeight: FontWeight.bold)), Text('Clique para ver detalhes', style: TextStyle(fontSize: 11, color: Colors.grey))]),
-          ]),
-        ),
-        const Spacer(),
-        IconButton(icon: Icon(Icons.edit, color: color, size: 20), onPressed: () => _showEditMealScheduleDialog(profileData)),
-        const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-      ]),
-    );
-  }
-
-  Widget _buildGreeting(String name, String? url, Color color) {
-    return Row(children: [CircleAvatar(radius: 25, backgroundColor: color.withOpacity(0.1), backgroundImage: (url != null && url.startsWith('http')) ? NetworkImage(url) : null, child: url == null ? Text(name[0], style: TextStyle(fontWeight: FontWeight.bold, color: color)) : null), const SizedBox(width: 12), Text('Olá, $name! Foco hoje.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]);
-  }
-
-  Widget _buildSuggestionCard(Map meal, Map checks, Color color) {
-    return Container(padding: const EdgeInsets.all(22), decoration: BoxDecoration(gradient: LinearGradient(colors: [color, color.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.2)), Text(meal['time'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))]), const SizedBox(height: 8), Text(meal['title'], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 18), ...List<String>.from(meal['options']).map((opt) { bool sel = checks[meal['key']] == opt; return GestureDetector(onTap: () => _db.toggleMealCompletion(meal['key'], opt), child: AnimatedContainer(duration: const Duration(milliseconds: 300), margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: sel ? Colors.white : Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(15), border: Border.all(color: sel ? Colors.white : Colors.white.withOpacity(0.3), width: 1.5)), child: Row(children: [Icon(sel ? Icons.check_circle : Icons.radio_button_unchecked, color: sel ? color : Colors.white, size: 22), const SizedBox(width: 12), Expanded(child: Text(opt, style: TextStyle(color: sel ? color : Colors.white, fontSize: 13, fontWeight: sel ? FontWeight.bold : FontWeight.normal)))]))); }).toList()]));
-  }
-
-  Widget _buildChecklist(Map checks) {
-    final m = ['cafe', 'lanche_m', 'almoco', 'lanche_t1', 'lanche_t2', 'jantar'];
-    final l = ['Café', 'Lanche M', 'Almoço', 'Lanche T1', 'Lanche T2', 'Jantar'];
-    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: List.generate(m.length, (i) { bool isDone = checks[m[i]] != null; return Padding(padding: const EdgeInsets.only(right: 8), child: FilterChip(label: Text(l[i], style: TextStyle(color: isDone ? Colors.white : Colors.black87)), selected: isDone, onSelected: (v) => _db.toggleMealCompletion(m[i], v ? "OK" : null), selectedColor: const Color(0xFF00695C), checkmarkColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)))); })));
   }
 
   Widget _buildHeaderIcon({required IconData icon, required Color color, required String label, required VoidCallback onPressed}) {

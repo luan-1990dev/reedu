@@ -2,7 +2,7 @@ name: reedu
 description: "Reedu - Reeducação Alimentar Inteligente"
 publish_to: 'none'
 
-version: 1.0.4+29
+version: 1.0.4+31
 
 environment:
   sdk: ^3.10.4
@@ -21,6 +21,7 @@ dependencies:
   fl_chart: ^0.70.2
   pdfx: ^2.4.0
   flutter_pdfview: ^1.3.2
+  google_mlkit_text_recognition: ^0.15.1
 
   # ATUALIZADOS PARA NOTIFICAÇÕES (Versões do seu script)
   flutter_local_notifications: ^21.0.0

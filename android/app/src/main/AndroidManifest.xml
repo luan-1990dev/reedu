@@ -19,6 +19,7 @@
     <!-- DECLARAÇÃO DE HARDWARE (EVITA BLOQUEIO NA PLAY STORE) -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
     <!-- CORREÇÃO: Alterado de 'io.flutter.app.FlutterApplication' para '${applicationName}' -->
     <application

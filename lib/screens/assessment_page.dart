@@ -1,11 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:syncfusion_flutter_pdf/pdf.dart' as sync; // ADICIONADO PREFIXO
-import 'package:intl/intl.dart';
-import 'package:path/path.dart' as p;
-import 'package:pdfx/pdfx.dart' as px; // ADICIONADO PREFIXO
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../services/database_service.dart';
 
 class AssessmentPage extends StatefulWidget {
@@ -17,187 +14,361 @@ class AssessmentPage extends StatefulWidget {
 
 class _AssessmentPageState extends State<AssessmentPage> {
   final DatabaseService _db = DatabaseService();
-  final Map<String, TextEditingController> _controllers = {};
-  bool _isEditing = false;
+  final ScrollController _scrollController = ScrollController();
+  final TextRecognizer _textRecognizer = TextRecognizer();
   bool _isLoading = false;
-  String? _lastPdfPath;
-  String? _lastPdfName;
+  bool _showTitle = true;
 
-  final List<String> _fields = [
-    'NOME', 'IDADE', 'ALTURA', 'PESO META',
-    'Peso', 'IMC', 'PGC', 'PME'
-  ];
+  final Map<String, List<String>> _metricGroups = {
+    'GERAL': ['Peso', 'IDADE', 'ALTURA', 'PESO META'],
+    'MEDIDAS PERIFÉRICAS': [
+      'Cintura', 'Abdômen', 'Peitoral', 'Quadril',
+      'Coxa direita', 'Coxa esquerda', 'Panturrilha dir.', 'Panturrilha esq.'
+    ],
+    'BIOIMPEDÂNCIA': [
+      'IMC', 'PGC (Gordura)', 'PME (Massa Magra)', 'MB (Metabolismo)',
+      'IC (Idade Corporal)', 'GV (Gordura Visceral)'
+    ],
+  };
+
+  final Map<String, TextEditingController> _controllers = {};
 
   @override
   void initState() {
     super.initState();
-    for (var field in _fields) {
-      _controllers[field] = TextEditingController();
-    }
-    _loadAllData();
+    _metricGroups.forEach((group, metrics) {
+      for (var m in metrics) {
+        _controllers[m] = TextEditingController();
+      }
+    });
+    _loadData();
+    _scrollController.addListener(() {
+      if (_scrollController.offset > 50 && _showTitle) {
+        setState(() => _showTitle = false);
+      } else if (_scrollController.offset <= 50 && !_showTitle) {
+        setState(() => _showTitle = true);
+      }
+    });
   }
 
-  Future<void> _loadAllData() async {
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _controllers.forEach((_, c) => c.dispose());
+    _textRecognizer.close();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final userSnap = await _db.userProfileStream.first;
-    final lastEval = await _db.getLatestAssessment();
-
-    if (userSnap.exists) {
-      final u = userSnap.data() as Map<String, dynamic>;
-      _controllers['NOME']!.text = (u['nickname'] ?? u['name'] ?? '').toString();
-      _controllers['IDADE']!.text = (u['age'] ?? '').toString();
-      _controllers['ALTURA']!.text = (u['height'] ?? '').toString();
-      _controllers['PESO META']!.text = (u['targetWeight'] ?? '').toString();
-
-      if (lastEval != null && lastEval.exists) {
-        final e = lastEval.data() as Map<String, dynamic>;
-        for (var f in _fields) {
-          if (e.containsKey(f)) _controllers[f]!.text = e[f].toString();
-        }
-      }
+    final doc = await _db.getLatestAssessment();
+    if (doc != null && doc.exists) {
+      final data = doc.data() as Map<String, dynamic>;
+      setState(() {
+        _controllers.forEach((key, controller) {
+          if (data.containsKey(key)) {
+            controller.text = data[key].toString();
+          }
+        });
+      });
     }
     setState(() => _isLoading = false);
   }
 
-  Future<void> _importPDF() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf']);
-    if (result != null) {
-      setState(() => _isLoading = true);
-      final file = File(result.files.single.path!);
+  // --- LÓGICA DE IMPORTAÇÃO HÍBRIDA ---
+  Future<void> _importAssessment() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'png', 'jpeg'],
+      );
 
-      // CORREÇÃO: Usando o prefixo 'sync' para extração
-      final sync.PdfDocument document = sync.PdfDocument(inputBytes: file.readAsBytesSync());
-      String text = sync.PdfTextExtractor(document).extractText();
-      document.dispose();
+      if (result != null) {
+        setState(() => _isLoading = true);
+        String extractedText = "";
+        String filePath = result.files.single.path!;
+        String extension = result.files.single.extension?.toLowerCase() ?? "";
 
-      _smartParse(text);
-      setState(() {
-        _lastPdfPath = file.path;
-        _lastPdfName = p.basename(file.path);
-        _isLoading = false;
-        _isEditing = true;
-      });
+        if (extension == 'pdf') {
+          final bytes = File(filePath).readAsBytesSync();
+          final document = PdfDocument(inputBytes: bytes);
+          extractedText = PdfTextExtractor(document).extractText();
+          document.dispose();
+        } else {
+          final inputImage = InputImage.fromFilePath(filePath);
+          final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
+          extractedText = recognizedText.text;
+        }
+
+        _parseAssessmentText(extractedText);
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint("Erro: $e");
     }
   }
 
-  void _smartParse(String text) {
+  void _parseAssessmentText(String rawText) {
+    final text = rawText.replaceAll(',', '.');
     setState(() {
-      if (text.contains('Peso')) _controllers['Peso']!.text = '85.5';
+      _controllers.forEach((metric, controller) {
+        final pattern = RegExp('$metric' + r'[:\-]*\s*(\d+\.?\d*)', caseSensitive: false);
+        final match = pattern.firstMatch(text);
+        if (match != null) {
+          controller.text = match.group(1)!;
+        }
+      });
     });
   }
 
-  Widget _buildPdfCard(String title, String date, String filePath) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 25),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(12),
-        leading: Container(
-          width: 50,
-          height: 70,
-          decoration: BoxDecoration(
-            color: Colors.red.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.picture_as_pdf, color: Colors.redAccent, size: 30),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text("Recebido em $date", style: const TextStyle(fontSize: 11)),
-        trailing: ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00695C),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            elevation: 0,
-          ),
-          onPressed: () => _openPdfViewer(filePath),
-          child: const Text("ABRIR", style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-        ),
-      ),
-    );
-  }
-
-  void _openPdfViewer(String filePath) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          appBar: AppBar(title: Text(_lastPdfName ?? "Documento"), backgroundColor: Colors.black),
-          backgroundColor: Colors.grey[900],
-          // CORREÇÃO: Usando o prefixo 'px' para visualização
-          body: px.PdfView(
-            controller: px.PdfController(
-              document: px.PdfDocument.openFile(filePath),
-            ),
-          ),
-        ),
-      ),
-    );
+  Future<void> _save() async {
+    setState(() => _isLoading = true);
+    Map<String, dynamic> data = {};
+    _controllers.forEach((key, controller) {
+      if (controller.text.isNotEmpty) {
+        data[key] = double.tryParse(controller.text) ?? controller.text;
+      }
+    });
+    await _db.saveAssessment(data);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Avaliação salva com sucesso!"), backgroundColor: Colors.green)
+      );
+    }
+    setState(() => _isLoading = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    const Color primaryBlue = Color(0xFF1967D2);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: const Text("Avaliação Física", style: TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
-        actions: [
-          IconButton(icon: const Icon(Icons.file_upload_outlined), onPressed: _importPDF),
-          IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit), onPressed: () => setState(() => _isEditing = !_isEditing)),
-        ],
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            if (_lastPdfPath != null)
-              _buildPdfCard(_lastPdfName!, DateFormat('dd/MM/yyyy').format(DateTime.now()), _lastPdfPath!),
-
-            _buildDataSection("Composição Corporal", [
-              _buildField("Peso Atual", "Peso", "kg"),
-              _buildField("IMC", "IMC", "pts"),
-              _buildField("Gordura Corporal", "PGC", "%"),
-            ]),
-          ],
-        ),
+          : CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 120.0,
+            pinned: true,
+            backgroundColor: primaryBlue,
+            elevation: 0,
+            leading: const BackButton(color: Colors.white),
+            actions: [
+              IconButton(icon: const Icon(Icons.document_scanner, color: Colors.white), onPressed: _importAssessment),
+              IconButton(icon: const Icon(Icons.done_all, color: Colors.white), onPressed: _save),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              centerTitle: true,
+              title: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: _showTitle ? 1.0 : 0.0,
+                child: const Text('Minha Avaliação', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+              background: Container(
+                decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [primaryBlue, Color(0xFF163C63)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                ),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  _buildModernHeader(),
+                  const SizedBox(height: 25),
+                  _buildCategoryCard('GERAL', Icons.person_pin_rounded, Colors.orange),
+                  const SizedBox(height: 15),
+                  _buildCategoryCard('MEDIDAS PERIFÉRICAS', Icons.straighten_rounded, Colors.blueGrey),
+                  const SizedBox(height: 15),
+                  _buildCategoryCard('BIOIMPEDÂNCIA', Icons.monitor_weight_rounded, Colors.blue),
+                  const SizedBox(height: 15),
+                  _buildIdealValuesCard(),
+                  const SizedBox(height: 50),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildDataSection(String title, List<Widget> children) {
+  Widget _buildModernHeader() {
+    double peso = double.tryParse(_controllers['Peso']?.text ?? "0") ?? 0;
+    double meta = double.tryParse(_controllers['PESO META']?.text ?? "0") ?? 0;
+    double diff = (peso - meta).abs();
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF163C63),
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 10))],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _headerItem("Peso Atual", "${peso.toStringAsFixed(1)}", "kg"),
+          Container(width: 1, height: 50, color: Colors.white10),
+          _headerItem("Meta", "${meta.toStringAsFixed(1)}", "kg"),
+          if (peso > 0 && meta > 0) ...[
+            Container(width: 1, height: 50, color: Colors.white10),
+            _headerItem("Faltam", diff.toStringAsFixed(1), "kg", color: Colors.orangeAccent),
+          ]
+        ],
+      ),
+    );
+  }
+
+  Widget _headerItem(String label, String value, String unit, {Color color = Colors.white}) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
-        const SizedBox(height: 10),
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          child: Column(children: children),
+        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 4),
+        RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(text: value, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.w900)),
+              TextSpan(text: " $unit", style: TextStyle(color: color.withOpacity(0.6), fontSize: 12)),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildField(String label, String key, String unit) {
-    return ListTile(
-      title: Text(label, style: const TextStyle(fontSize: 14)),
-      trailing: SizedBox(
-        width: 100,
-        child: TextField(
-          controller: _controllers[key],
-          enabled: _isEditing,
-          textAlign: TextAlign.end,
-          decoration: InputDecoration(suffixText: " $unit", border: InputBorder.none),
-          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-        ),
+  Widget _buildCategoryCard(String title, IconData icon, Color color) {
+    List<String> metrics = _metricGroups[title] ?? [];
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 15, offset: const Offset(0, 5))],
       ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(width: 15),
+                Text(title, style: TextStyle(color: Colors.blueGrey.shade800, fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 0.5)),
+              ],
+            ),
+          ),
+          const Divider(height: 1, indent: 20, endIndent: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Column(
+              children: metrics.map((m) => _buildMetricRow(m)).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricRow(String label) {
+    // Lógica correta de unidades
+    String unit = 'cm';
+    if (label == 'Peso' || label == 'PESO META') unit = 'kg';
+    else if (label == 'IDADE') unit = 'anos';
+    else if (label == 'ALTURA') unit = 'm';
+    else if (label.contains('Gordura') || label.contains('Massa')) unit = '%';
+    else if (label.contains('Metabolismo')) unit = 'kcal';
+    else if (label.contains('Visceral')) unit = 'nív';
+    else if (label == 'IMC') unit = 'kg/m²';
+
+    Color valueColor = const Color(0xFF374151);
+    if (label == 'IMC' || label == 'GV (Gordura Visceral)' || label == 'PGC (Gordura)') {
+      double val = double.tryParse(_controllers[label]!.text) ?? 0;
+      if (val > 0) valueColor = Colors.redAccent;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.blueGrey.shade400, fontSize: 14, fontWeight: FontWeight.w500)),
+          Row(
+            children: [
+              SizedBox(
+                width: 70,
+                child: TextField(
+                  controller: _controllers[label],
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.end,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: valueColor, fontSize: 16),
+                  decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero
+                  ),
+                  onChanged: (v) => setState(() {}),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(unit, style: TextStyle(fontSize: 12, color: Colors.blueGrey.shade200, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIdealValuesCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF00695C), Color(0xFF00897B)]),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(children: [
+            Icon(Icons.auto_awesome, color: Colors.white, size: 18),
+            SizedBox(width: 10),
+            Text("REFERÊNCIAS IDEAIS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          ]),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _idealItem("IMC", "18.5-25"),
+              _idealItem("GORDURA", "8-19%"),
+              _idealItem("MASSA", "33-39%"),
+              _idealItem("VISCERAL", "1-9"),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _idealItem(String label, String range) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 9, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(range, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900)),
+      ],
     );
   }
 }

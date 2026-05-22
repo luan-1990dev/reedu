@@ -41,8 +41,8 @@ android {
         targetSdk = 35
 
         // DICA: Lembre-se de aumentar o versionCode para cada novo envio ao Google
-        versionCode = 29
-        versionName = "1.0.8.29"
+        versionCode = 31
+        versionName = "1.0.8.31"
 
         multiDexEnabled = true
     }

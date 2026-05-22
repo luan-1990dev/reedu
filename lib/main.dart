@@ -112,7 +112,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dispara a manutenção diária após o carregamento da interface
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (isFirebaseReady) _setupNotificationsSafe();
     });
@@ -135,7 +134,7 @@ class MyApp extends StatelessWidget {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
-            if (snapshot.hasData) {
+            if (snapshot.hasData && snapshot.data != null) {
               return const HomePage();
             }
             return const LoginPage();
