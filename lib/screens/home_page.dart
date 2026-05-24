@@ -55,7 +55,122 @@ class _HomePageState extends State<HomePage> {
     return "Usuário";
   }
 
-  void _showEditMealScheduleDialog(Map<String, dynamic>? profileData) {// 1. Carrega a lista do Firebase ou usa os padrões se estiver vazio
+  Widget _buildChecklist(Map<String, dynamic> mealChecks, Map<String, dynamic>? currentMenu) {
+    List<String> activeMeals = currentMenu?.keys
+        .where((key) => key != 'Observações' && key != 'menu')
+        .toList() ?? [];
+
+
+    final List<String> order = [
+      'Café da Manhã',
+      'Lanche da Manhã',
+      'Almoço',
+      'Lanche da Tarde 2',
+      'Jantar'
+    ];
+
+    activeMeals.sort((a, b) {
+      int idxA = order.indexOf(a);
+      int idxB = order.indexOf(b);
+      return (idxA == -1 ? 99 : idxA).compareTo(idxB == -1 ? 99 : idxB);
+    });
+
+    if (activeMeals.isEmpty) {
+      return const Text("Cadastre seu cardápio para ver o checklist.",
+          style: TextStyle(fontSize: 12, color: Colors.grey));
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: activeMeals.map((mealName) {
+          bool isDone = mealChecks[mealName] != null;
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onLongPress: () => _confirmDeleteMeal(mealName),
+              child: FilterChip(
+                label: Text(
+                  mealName.contains(' ') ? mealName.split(' ')[0] : mealName,
+                  style: TextStyle(
+                    color: isDone ? Colors.white : Colors.black87,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                selected: isDone,
+                onSelected: (bool selected) {
+                  _db.toggleMealCompletion(mealName, selected ? "OK" : null);
+                },
+                selectedColor: const Color(0xFF00695C),
+                checkmarkColor: Colors.white,
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: isDone ? Colors.transparent : Colors.grey.shade300,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+  void _confirmDeleteMeal(String mealName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_sweep, color: Colors.red),
+            const SizedBox(width: 10),
+            const Text("Excluir Refeição?"),
+          ],
+        ),
+        content: Text("Deseja remover '$mealName' permanentemente do seu cardápio?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCELAR", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              // Remove a chave do mapa 'menu' no Firestore
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid)
+                  .update({'menu.$mealName': FieldValue.delete()});
+
+              if (mounted) Navigator.pop(context);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("'$mealName' removido."), backgroundColor: Colors.redAccent)
+              );
+            },
+            child: const Text("EXCLUIR", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditMealScheduleDialog(Map<String, dynamic>? profileData) {
+    // Lista de nomes para busca no banco
+    final List<String> mealNames = [
+      'Café da Manhã', 'Lanche da Manhã', 'Almoço',
+      'Lanche da Tarde 1', 'Lanche da Tarde 2', 'Jantar'
+    ];
+
     final List<dynamic> currentSchedules = profileData?['meal_schedules'] ?? [
       {'id': 1, 'name': 'Café da Manhã', 'hour': 7, 'minute': 30},
       {'id': 2, 'name': 'Lanche da Manhã', 'hour': 9, 'minute': 00},
@@ -65,7 +180,6 @@ class _HomePageState extends State<HomePage> {
       {'id': 6, 'name': 'Jantar', 'hour': 21, 'minute': 00},
     ];
 
-    // 2. Criamos uma cópia mutável para manipular no diálogo
     List<Map<String, dynamic>> tempSchedules = List.from(
         currentSchedules.map((e) => Map<String, dynamic>.from(e))
     );
@@ -74,7 +188,6 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          // Mantém sempre ordenado por horário para o usuário
           tempSchedules.sort((a, b) =>
               (a['hour'] * 60 + a['minute']).compareTo(b['hour'] * 60 + b['minute'])
           );
@@ -135,69 +248,21 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const Divider(height: 30),
-
-                  // BOTÃO PARA ADICIONAR NOVO
-                  TextButton.icon(
-                    icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-                    label: const Text("ADICIONAR REFEIÇÃO",
-                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)
-                    ),
-                    onPressed: () {
-                      final nameController = TextEditingController();
-                      showDialog(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text("Nome da Refeição"),
-                          content: TextField(
-                            controller: nameController,
-                            autofocus: true,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: const InputDecoration(
-                              hintText: "Ex: Ceia, Pré-Treino...",
-                              border: OutlineInputBorder(),
+                             ],
                             ),
                           ),
-                          actions: [
-                            TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text("CANCELAR")
-                            ),
-                            ElevatedButton(
-                              onPressed: () {
-                                if (nameController.text.isNotEmpty) {
-                                  setDialogState(() {
-                                    tempSchedules.add({
-                                      'id': DateTime.now().millisecondsSinceEpoch,
-                                      'name': nameController.text.trim(),
-                                      'hour': 12,
-                                      'minute': 0,
-                                    });
-                                  });
-                                  Navigator.pop(ctx);
-                                }
-                              },
-                              child: const Text("ADICIONAR"),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
+              actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('CANCELAR', style: TextStyle(color: Colors.red))
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1967D2),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                    padding: const EdgeInsets.symmetric(horizontal: 25)
-                ),
+              onPressed: () => Navigator.pop(context),
+          child: const Text('CANCELAR', style: TextStyle(color: Colors.red))
+          ),
+          ElevatedButton(
+          style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF1967D2),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          padding: const EdgeInsets.symmetric(horizontal: 25)
+          ),
                 onPressed: () async {
                   // 1. Salva a nova lista (completa) no Firestore
                   await FirebaseFirestore.instance
@@ -325,10 +390,18 @@ class _HomePageState extends State<HomePage> {
     List<String> getOptions(String mealName) {
       if (customMenu != null && customMenu.containsKey(mealName) && customMenu[mealName].toString().isNotEmpty) {
         String rawText = customMenu[mealName].toString();
+        List<String> splitList = [];
         if (rawText.contains('•')) {
-          return rawText.split('•').map((opt) => opt.trim()).where((opt) => opt.isNotEmpty).toList();
+          splitList = rawText.split('•');
+        } else if (rawText.contains('Opção')) {
+          splitList = rawText.split(RegExp(r'(?=Opção\s*\d+:)'));
+        } else {
+          return [rawText];
         }
-        return [rawText];
+        return splitList
+            .map((opt) => opt.trim())
+            .where((opt) => opt.isNotEmpty)
+            .toList();
       }
       return DietService.mealOptions[mealName] ?? ['Ver plano detalhado'];
     }
@@ -447,7 +520,7 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 25),
                               const Text('Checklist do Dia', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 10),
-                              _buildChecklist(mealChecks),
+                              _buildChecklist(mealChecks, profileData?['menu']),
                               const SizedBox(height: 25),
                               _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
                               const SizedBox(height: 25),
@@ -523,53 +596,97 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [color, color.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        gradient: LinearGradient(
+            colors: [color, color.withOpacity(0.85)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight
+        ),
         borderRadius: BorderRadius.circular(30),
-        boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          )
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('SUGESTÃO AGORA', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.2)),
-            Text(meal['time'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))
-          ]),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                  'SUGESTÃO AGORA',
+                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.2)
+              ),
+              Text(
+                  meal['time'] ?? '',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text(meal['title'], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(
+              meal['title'],
+              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)
+          ),
           const SizedBox(height: 18),
-          ...options.map((opt) {
-            bool isThisSelected = currentMealStatus == opt;
-            return _buildMealOptionCard(
-              optionText: opt,
-              isSelected: isThisSelected,
-              onTap: () => _db.toggleMealCompletion(meal['key'], opt),
-            );
-          }).toList(),
+          // Gerando um card individual para cada opção de refeição
+          ...options.map((opt) => _buildOptionTile(
+            text: opt,
+            isSelected: currentMealStatus == opt,
+            themeColor: color,
+            onTap: () => _db.toggleMealCompletion(meal['key'], opt),
+          )).toList(),
         ],
       ),
     );
   }
 
-  Widget _buildChecklist(Map checks) {
-    final m = ['cafe', 'lanche_m', 'almoco', 'lanche_t1', 'lanche_t2', 'jantar'];
-    final l = ['Café', 'Lanche M', 'Almoço', 'Lanche T1', 'Lanche T2', 'Jantar'];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: List.generate(m.length, (i) {
-          bool isDone = checks[m[i]] != null;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(l[i], style: TextStyle(color: isDone ? Colors.white : Colors.black87)),
-              selected: isDone,
-              onSelected: (v) => _db.toggleMealCompletion(m[i], v ? "OK" : null),
-              selectedColor: const Color(0xFF00695C),
-              checkmarkColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+  Widget _buildOptionTile({
+    required String text,
+    required bool isSelected,
+    required Color themeColor,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.white.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isSelected ? Colors.white : Colors.white.withOpacity(0.2),
+            width: 1.5,
+          ),
+          boxShadow: isSelected
+              ? [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4))]
+              : [],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: isSelected ? themeColor : Colors.white70,
+              size: 24,
             ),
-          );
-        }),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: isSelected ? const Color(0xFF1A1C1E) : Colors.white,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -639,7 +756,7 @@ class _HomePageState extends State<HomePage> {
           backgroundImage: (url != null && url.startsWith('http')) ? NetworkImage(url) : null,
           child: url == null ? Text(name[0], style: TextStyle(fontWeight: FontWeight.bold, color: color)) : null),
       const SizedBox(width: 12),
-      Text('Olá, $name! Foco hoje.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))
+      Text('Olá, $name! Vamos focar!!!.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))
     ]);
   }
 

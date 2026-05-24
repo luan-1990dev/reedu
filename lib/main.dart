@@ -11,9 +11,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'screens/login_page.dart';
 import 'screens/home_page.dart';
 import 'services/notification_service.dart';
-import 'services/database_service.dart'; // Caminho corrigido
+import 'services/database_service.dart';
 
-// FUNÇÃO TOP-LEVEL PARA MENSAGENS EM SEGUNDO PLANO (Obrigatório)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -21,10 +20,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 void main() async {
-  // 1. Garante a inicialização dos Widgets do Flutter
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 2. Inicializa a formatação de datas para o Calendário
   await initializeDateFormatting('pt_BR', null);
 
   // 3. Modo Imersivo Total e Estilo do Sistema
@@ -34,31 +30,25 @@ void main() async {
     statusBarIconBrightness: Brightness.dark,
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.dark,
-    systemNavigationBarContrastEnforced: false,
   ));
 
   bool firebaseInitialized = false;
 
   try {
-    // 4. Inicializa o Firebase
     await Firebase.initializeApp();
     firebaseInitialized = true;
 
-    // 5. Configura o Crashlytics para capturar erros automaticamente
     FlutterError.onError = (errorDetails) {
       FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
     };
 
-    // Captura erros assíncronos fora do contexto do Flutter
     PlatformDispatcher.instance.onError = (error, stack) {
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       return true;
     };
 
-    // 6. Configura Push Notifications em segundo plano
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // 7. Inicializa os serviços de Notificação
     final notificationService = NotificationService();
     await notificationService.initNotification();
     await notificationService.setupPushNotifications();
@@ -70,15 +60,11 @@ void main() async {
   runApp(MyApp(isFirebaseReady: firebaseInitialized));
 }
 
-// Rotina de manutenção: Limpa histórico e agenda alarmes
 Future<void> _setupNotificationsSafe() async {
   try {
     final notificationService = NotificationService();
     final DatabaseService db = DatabaseService();
-
-    // Limpa alertas de dias anteriores (Regra das 00:00)
     await db.clearOldNotifications();
-
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
@@ -87,10 +73,8 @@ Future<void> _setupNotificationsSafe() async {
         final data = doc.data()!;
         final double waterTarget = (data['waterTarget'] ?? 4.0).toDouble();
 
-        // Agenda lembretes de água
         await notificationService.scheduleWaterReminders(waterTarget);
 
-        // Agenda lembretes de refeições
         if (data.containsKey('meal_schedules')) {
           final List<dynamic> schedules = data['meal_schedules'];
           await notificationService.scheduleCustomNotifications(
@@ -135,6 +119,9 @@ class MyApp extends StatelessWidget {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
             if (snapshot.hasData && snapshot.data != null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _setupNotificationsSafe();
+              });
               return const HomePage();
             }
             return const LoginPage();

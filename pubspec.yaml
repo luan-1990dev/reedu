@@ -2,7 +2,7 @@ name: reedu
 description: "Reedu - Reeducação Alimentar Inteligente"
 publish_to: 'none'
 
-version: 1.0.4+31
+version: 1.0.4+33
 
 environment:
   sdk: ^3.10.4
@@ -35,6 +35,7 @@ dependencies:
   syncfusion_flutter_pdf: ^25.1.37
   permission_handler: ^11.3.1
   firebase_crashlytics: ^4.3.10
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

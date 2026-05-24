@@ -6,6 +6,26 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
+import '../services/notification_service.dart';
+
+// 1. Classe para organizar os controladores de cada card (Título + Múltiplas Opções)
+class MealEntry {
+  TextEditingController titleController;
+  List<TextEditingController> optionsControllers;
+
+  MealEntry({required String title, required List<String> options})
+      : titleController = TextEditingController(text: title),
+        optionsControllers = options.isEmpty
+            ? [TextEditingController()]
+            : options.map((o) => TextEditingController(text: o)).toList();
+
+  void dispose() {
+    titleController.dispose();
+    for (var c in optionsControllers) {
+      c.dispose();
+    }
+  }
+}
 
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
@@ -23,15 +43,12 @@ class _MenuPageState extends State<MenuPage> {
   bool _isEditing = false;
   bool _showTitle = true;
 
-  final Map<String, TextEditingController> _controllers = {};
+  List<MealEntry> _mealEntries = [];
+  MealEntry? _obsEntry;
 
   final List<String> _defaultMealOrder = [
-    'Café da Manhã',
-    'Lanche da Manhã',
-    'Almoço',
-    'Lanche da Tarde 1',
-    'Lanche da Tarde 2',
-    'Jantar'
+    'Café da Manhã', 'Lanche da Manhã', 'Almoço',
+    'Lanche da Tarde 1', 'Lanche da Tarde 2', 'Jantar'
   ];
 
   @override
@@ -50,111 +67,139 @@ class _MenuPageState extends State<MenuPage> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _controllers.forEach((_, c) => c.dispose());
+    for (var entry in _mealEntries) { entry.dispose(); }
+    _obsEntry?.dispose();
     _textRecognizer.close();
     super.dispose();
   }
 
-  // --- FUNÇÃO DE FORMATAÇÃO PARA ORGANIZAR O TEXTO ---
   String _formatExtractedText(String text) {
     if (text.isEmpty) return text;
-
     String formatted = text;
-
-    // 1. Adiciona quebra de linha e bullet point antes de "Opção" ou "Opcao"
-    // CORREÇÃO: Escapado o $ com \ para não dar erro de identificador
     formatted = formatted.replaceAll(RegExp(r'(?i)Opç[ãa]o\s*(\d+)'), '\n• Opção \$1');
-
-    // 2. Adiciona quebra de linha antes de observações
     formatted = formatted.replaceAll(RegExp(r'(?i)OBS:'), '\n\n📌 OBS:');
-
-    // 3. Corrige espaços duplos e limpa o início/fim
     formatted = formatted.replaceAll(RegExp(r' +'), ' ').trim();
-
-    // 4. Se o texto começar com quebras, remove-as
     if (formatted.startsWith('\n')) {
       formatted = formatted.replaceFirst(RegExp(r'\n+'), '');
     }
-
     return formatted;
   }
 
   Future<void> _loadMenuData() async {
     setState(() => _isLoading = true);
     final userSnap = await _db.userProfileStream.first;
+
     if (userSnap.exists) {
       final data = userSnap.data() as Map<String, dynamic>;
       final Map<String, dynamic>? saved = data['menu'];
-      if (saved != null) {
+
+      if (saved != null && saved.isNotEmpty) {
+        _mealEntries.clear();
         saved.forEach((key, value) {
-          if (!_controllers.containsKey(key)) {
-            _controllers[key] = TextEditingController();
+          List<String> options = [];
+          if (value is List) {
+            options = value.map((e) => e.toString()).toList();
+          } else {
+            options = value.toString().split('•').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
           }
-          _controllers[key]!.text = value.toString();
+
+          if (key == 'Observações') {
+            _obsEntry = MealEntry(title: key, options: options);
+          } else {
+            _mealEntries.add(MealEntry(title: key, options: options));
+          }
         });
+      } else {
+        _mealEntries = _defaultMealOrder.map((m) => MealEntry(title: m, options: [""])).toList();
       }
     }
-    // Garante controladores para itens padrão
-    for (var meal in _defaultMealOrder) {
-      if (!_controllers.containsKey(meal)) _controllers[meal] = TextEditingController();
-    }
-    if (!_controllers.containsKey('Observações')) {
-      _controllers['Observações'] = TextEditingController();
-    }
+    _obsEntry ??= MealEntry(title: 'Observações', options: [""]);
     setState(() => _isLoading = false);
   }
 
   void _addNewMeal() {
-    final nameController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Nova Refeição"),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: "Nome (Ex: Ceia)"),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
-          ElevatedButton(
-            onPressed: () {
-              if (nameController.text.isNotEmpty) {
-                setState(() {
-                  _controllers[nameController.text] = TextEditingController();
-                  _isEditing = true;
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("CRIAR"),
-          )
-        ],
-      ),
-    );
+    setState(() {
+      _mealEntries.add(MealEntry(title: "Nova Refeição", options: [""]));
+      _isEditing = true;
+    });
   }
 
-  void _deleteMeal(String mealName) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    await FirebaseFirestore.instance.collection('users').doc(uid).update({
-      'menu.$mealName': FieldValue.delete(),
-    });
+  void _deleteMeal(int index) {
     setState(() {
-      _controllers[mealName]?.dispose();
-      _controllers.remove(mealName);
+      _mealEntries[index].dispose();
+      _mealEntries.removeAt(index);
     });
   }
 
   Future<void> _saveData() async {
     setState(() => _isLoading = true);
-    Map<String, String> data = {};
-    _controllers.forEach((key, controller) => data[key] = controller.text);
-    await _db.saveMenu(data);
-    setState(() { _isEditing = false; _isLoading = false; });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cardápio atualizado!'), backgroundColor: Colors.green)
-      );
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    Map<String, String> menuData = {};
+    List<Map<String, dynamic>> updatedSchedules = [];
+
+    // 1. Recupera os horários atuais para não perdê-los ao renomear/reordenar
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    List<dynamic> existingSchedules = userDoc.data()?['meal_schedules'] ?? [];
+
+    for (int i = 0; i < _mealEntries.length; i++) {
+      var entry = _mealEntries[i];
+      String title = entry.titleController.text.trim();
+
+      if (title.isNotEmpty) {
+        // Texto para o cardápio
+        menuData[title] = entry.optionsControllers
+            .map((c) => c.text.trim())
+            .where((t) => t.isNotEmpty)
+            .join(' • ');
+
+        // Busca se já existia um horário para este índice ou este nome
+        var oldMatch = existingSchedules.length > i ? existingSchedules[i] : null;
+
+        updatedSchedules.add({
+          'id': i + 1,
+          'name': title,
+          'hour': oldMatch != null ? oldMatch['hour'] : (7 + i),
+          'minute': oldMatch != null ? oldMatch['minute'] : 0,
+        });
+      }
+    }
+
+    if (_obsEntry != null) {
+      menuData['Observações'] = _obsEntry!.optionsControllers[0].text;
+    }
+
+    try {
+      // Salva o Cardápio
+      await _db.saveMenu(menuData);
+
+      // Sincroniza a lista de horários/alertas
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'meal_schedules': updatedSchedules,
+      });
+
+      // Reagenda as notificações
+      final NotificationService notifications = NotificationService();
+      await notifications.scheduleCustomNotifications(updatedSchedules);
+
+      setState(() {
+        _isEditing = false;
+        _isLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cardápio e Alertas sincronizados! 🔄'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      debugPrint("Erro ao salvar: $e");
     }
   }
 
@@ -183,98 +228,39 @@ class _MenuPageState extends State<MenuPage> {
         }
 
         _smartParseMenu(extractedText);
-        setState(() {
-          _isLoading = false;
-          _isEditing = true;
-        });
+        setState(() { _isLoading = false; _isEditing = true; });
       }
-    } catch (e) {
-      setState(() => _isLoading = false);
-      debugPrint("Erro na importação: $e");
-    }
+    } catch (e) { setState(() => _isLoading = false); }
   }
 
   void _smartParseMenu(String rawText) {
     final text = rawText.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r'\s+'), ' ');
-    final allPossibleMeals = [..._defaultMealOrder, ..._controllers.keys].toSet().toList();
+    final titles = _mealEntries.map((e) => e.titleController.text).toList();
 
     setState(() {
-      for (var meal in allPossibleMeals) {
-        final pattern = RegExp(
-            '$meal' + r'[:\-]*\s*(.*?)(?=' + allPossibleMeals.join('|') + r'|OBS:|Dra\.|$)',
-            caseSensitive: false
-        );
+      for (var entry in _mealEntries) {
+        final pattern = RegExp('${RegExp.escape(entry.titleController.text)}' + r'[:\-]*\s*(.*?)(?=' + titles.join('|') + r'|OBS:|Dra\.|$)', caseSensitive: false);
         final match = pattern.firstMatch(text);
         if (match != null) {
-          String content = match.group(1)!.trim();
-          content = _formatExtractedText(content);
-
-          if (!_controllers.containsKey(meal)) _controllers[meal] = TextEditingController();
-          _controllers[meal]!.text = content;
+          String content = _formatExtractedText(match.group(1)!.trim());
+          entry.optionsControllers = [TextEditingController(text: content)];
         }
       }
     });
   }
 
-  void _showStatsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
-        title: const Text('MAIS CONSUMIDOS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _db.topMenuOptions,
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              var docs = snapshot.data!.docs;
-              if (docs.isEmpty) return const Text("Sem dados.");
-              return ListView.builder(
-                shrinkWrap: true,
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  var data = docs[index].data() as Map<String, dynamic>;
-                  return ListTile(
-                    leading: CircleAvatar(child: Text("${data['count']}x", style: const TextStyle(fontSize: 10))),
-                    title: Text(data['option'], style: const TextStyle(fontSize: 13)),
-                    subtitle: Text(data['mealType'], style: const TextStyle(fontSize: 10)),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("FECHAR"))],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     const Color primaryGreen = Color(0xFF2E7D32);
-
-    final sortedKeys = _controllers.keys.where((k) => k != 'Observações').toList()
-      ..sort((a, b) {
-        int indexA = _defaultMealOrder.indexOf(a);
-        int indexB = _defaultMealOrder.indexOf(b);
-        if (indexA == -1) indexA = 99;
-        if (indexB == -1) indexB = 99;
-        return indexA.compareTo(indexB);
-      });
-
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : CustomScrollView(
+      body: _isLoading ? const Center(child: CircularProgressIndicator()) : CustomScrollView(
         controller: _scrollController,
         slivers: [
           SliverAppBar(
             expandedHeight: 120.0, pinned: true, backgroundColor: primaryGreen,
             leading: const BackButton(color: Colors.white),
             actions: [
-              IconButton(icon: const Icon(Icons.analytics_outlined), onPressed: _showStatsDialog),
               IconButton(icon: const Icon(Icons.file_present), onPressed: _importFile),
               IconButton(
                 icon: Icon(_isEditing ? Icons.check : Icons.edit, color: Colors.white),
@@ -288,15 +274,7 @@ class _MenuPageState extends State<MenuPage> {
                 opacity: _showTitle ? 1.0 : 0.0,
                 child: const Text('Meu Cardápio', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
-              background: Container(
-                decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                        colors: [primaryGreen, Color(0xFF4CAF50)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter
-                    )
-                ),
-              ),
+              background: Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [primaryGreen, Color(0xFF4CAF50)], begin: Alignment.topCenter, end: Alignment.bottomCenter))),
             ),
           ),
           SliverToBoxAdapter(
@@ -304,8 +282,22 @@ class _MenuPageState extends State<MenuPage> {
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  ...sortedKeys.map((meal) => _buildMealCard(meal, primaryGreen)),
-                  if (_controllers.containsKey('Observações')) _buildMenuCard('Observações', primaryGreen),
+                  ReorderableListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _mealEntries.length,
+                    onReorder: (oldIndex, newIndex) {
+                      setState(() {
+                        if (newIndex > oldIndex) newIndex -= 1;
+                        final item = _mealEntries.removeAt(oldIndex);
+                        _mealEntries.insert(newIndex, item);
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      return _buildMealCard(_mealEntries[index], index, primaryGreen, key: ValueKey(_mealEntries[index]));
+                    },
+                  ),
+                  if (_obsEntry != null) _buildMenuCard(_obsEntry!, primaryGreen),
                   const SizedBox(height: 80),
                 ],
               ),
@@ -313,22 +305,15 @@ class _MenuPageState extends State<MenuPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: primaryGreen,
-        onPressed: _addNewMeal,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: FloatingActionButton(backgroundColor: primaryGreen, onPressed: _addNewMeal, child: const Icon(Icons.add, color: Colors.white)),
     );
   }
 
-  Widget _buildMealCard(String title, Color themeColor) {
+  Widget _buildMealCard(MealEntry entry, int index, Color themeColor, {required Key key}) {
     return Container(
+      key: key,
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -337,78 +322,53 @@ class _MenuPageState extends State<MenuPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.restaurant_menu, color: themeColor.withOpacity(0.7), size: 20),
-                    const SizedBox(width: 10),
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF374151))),
-                  ],
-                ),
-                if (_isEditing)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                    onPressed: () => _deleteMeal(title),
-                  ),
+                Row(children: [
+                  if (_isEditing) const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.reorder, color: Colors.grey, size: 20)),
+                  Icon(Icons.restaurant_menu, color: themeColor.withOpacity(0.7), size: 20),
+                  const SizedBox(width: 10),
+                  _isEditing
+                      ? SizedBox(width: 150, child: TextField(controller: entry.titleController, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), decoration: const InputDecoration(hintText: "Título", border: InputBorder.none, isDense: true)))
+                      : Text(entry.titleController.text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF374151))),
+                ]),
+                if (_isEditing) IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () => _deleteMeal(index)),
               ],
             ),
             const SizedBox(height: 15),
-            _isEditing
-                ? TextField(
-              controller: _controllers[title],
-              maxLines: null,
-              decoration: InputDecoration(
-                filled: true, fillColor: Colors.blue.withOpacity(0.05),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                hintText: "Personalize aqui...",
-              ),
-            )
-                : Text(
-              _controllers[title]!.text.isEmpty ? "Nenhum plano definido." : _controllers[title]!.text,
-              style: const TextStyle(
-                fontSize: 15,
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-                height: 1.6,
-              ),
-            ),
+            ...List.generate(entry.optionsControllers.length, (optIdx) => _buildOptionSubCard(entry, optIdx)),
+            if (_isEditing) TextButton.icon(onPressed: () => setState(() => entry.optionsControllers.add(TextEditingController())), icon: const Icon(Icons.add, size: 16), label: const Text("ADICIONAR OPÇÃO"), style: TextButton.styleFrom(foregroundColor: themeColor)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMenuCard(String key, Color themeColor) {
+  Widget _buildOptionSubCard(MealEntry entry, int optIdx) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.black.withOpacity(0.05))),
+      child: Row(
+        children: [
+          Text("Opção ${optIdx + 1}: ", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blueGrey)),
+          Expanded(child: TextField(controller: entry.optionsControllers[optIdx], enabled: _isEditing, maxLines: null, style: const TextStyle(fontSize: 14), decoration: const InputDecoration(border: InputBorder.none, hintText: "Descreva a opção..."))),
+          if (_isEditing && entry.optionsControllers.length > 1) IconButton(icon: const Icon(Icons.remove_circle_outline, size: 18, color: Colors.red), onPressed: () => setState(() => entry.optionsControllers.removeAt(optIdx))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuCard(MealEntry entry, Color themeColor) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(Icons.note_alt_outlined, color: themeColor, size: 20),
-              const SizedBox(width: 10),
-              Text(key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey))
-            ]),
+            Row(children: [Icon(Icons.note_alt_outlined, color: themeColor, size: 20), const SizedBox(width: 10), Text(entry.titleController.text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueGrey))]),
             const SizedBox(height: 12),
-            _isEditing
-                ? TextField(
-                controller: _controllers[key],
-                maxLines: null,
-                decoration: InputDecoration(
-                    filled: true, fillColor: Colors.blue.withOpacity(0.05),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)
-                )
-            )
-                : Text(
-                _controllers[key]!.text.isEmpty ? 'Nenhuma informação.' : _controllers[key]!.text,
-                style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.black54)
-            ),
+            TextField(controller: entry.optionsControllers[0], enabled: _isEditing, maxLines: null, decoration: InputDecoration(filled: true, fillColor: Colors.blue.withOpacity(0.05), border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none))),
           ],
         ),
       ),
