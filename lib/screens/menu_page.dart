@@ -8,7 +8,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/notification_service.dart';
 
-// 1. Classe para organizar os controladores de cada card (Título + Múltiplas Opções)
 class MealEntry {
   TextEditingController titleController;
   List<TextEditingController> optionsControllers;
@@ -30,6 +29,7 @@ class MealEntry {
 class MenuPage extends StatefulWidget {
   const MenuPage({super.key});
 
+
   @override
   State<MenuPage> createState() => _MenuPageState();
 }
@@ -48,8 +48,15 @@ class _MenuPageState extends State<MenuPage> {
 
   final List<String> _defaultMealOrder = [
     'Café da Manhã', 'Lanche da Manhã', 'Almoço',
-    'Lanche da Tarde 1', 'Lanche da Tarde 2', 'Jantar'
+    'Lanche da Tarde 2', 'Jantar'
   ];
+
+  void _addNewMeal() {
+    setState(() {
+      _mealEntries.add(MealEntry(title: "Nova Refeição", options: [""]));
+      _isEditing = true;
+    });
+  }
 
   @override
   void initState() {
@@ -85,31 +92,53 @@ class _MenuPageState extends State<MenuPage> {
     return formatted;
   }
 
+  // --- CARREGAMENTO (AJUSTADO PARA RESPEITAR A ORDEM SALVA) ---
   Future<void> _loadMenuData() async {
     setState(() => _isLoading = true);
     final userSnap = await _db.userProfileStream.first;
 
     if (userSnap.exists) {
       final data = userSnap.data() as Map<String, dynamic>;
-      final Map<String, dynamic>? saved = data['menu'];
+      final Map<String, dynamic>? savedMenu = data['menu'];
+      final List<dynamic>? savedSchedules = data['meal_schedules'];
 
-      if (saved != null && saved.isNotEmpty) {
-        _mealEntries.clear();
-        saved.forEach((key, value) {
-          List<String> options = [];
-          if (value is List) {
-            options = value.map((e) => e.toString()).toList();
-          } else {
-            options = value.toString().split('•').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-          }
+      if (savedMenu != null && savedMenu.isNotEmpty) {
+        List<MealEntry> loadedEntries = [];
 
-          if (key == 'Observações') {
-            _obsEntry = MealEntry(title: key, options: options);
-          } else {
-            _mealEntries.add(MealEntry(title: key, options: options));
+        // 1. Prioridade: Carregar na ordem da lista 'meal_schedules'
+        if (savedSchedules != null && savedSchedules.isNotEmpty) {
+          for (var schedule in savedSchedules) {
+            String name = schedule['name'];
+            if (savedMenu.containsKey(name)) {
+              loadedEntries.add(MealEntry(title: name, options: _parseValueToList(savedMenu[name])));
+            }
           }
-        });
+          // 2. Segurança: Adiciona itens do menu que talvez não estejam no schedule
+          savedMenu.forEach((key, value) {
+            if (key != 'Observações' && !loadedEntries.any((e) => e.titleController.text == key)) {
+              loadedEntries.add(MealEntry(title: key, options: _parseValueToList(value)));
+            }
+          });
+        } else {
+          // 3. Fallback: Ordem alfabética ou padrão caso nunca tenha salvo a ordem
+          savedMenu.forEach((key, value) {
+            if (key != 'Observações') {
+              loadedEntries.add(MealEntry(title: key, options: _parseValueToList(value)));
+            }
+          });
+          loadedEntries.sort((a, b) {
+            int indexA = _defaultMealOrder.indexOf(a.titleController.text);
+            int indexB = _defaultMealOrder.indexOf(b.titleController.text);
+            return (indexA == -1 ? 99 : indexA).compareTo(indexB == -1 ? 99 : indexB);
+          });
+        }
+
+        _mealEntries = loadedEntries;
+        if (savedMenu.containsKey('Observações')) {
+          _obsEntry = MealEntry(title: 'Observações', options: _parseValueToList(savedMenu['Observações']));
+        }
       } else {
+        // Inicialização padrão
         _mealEntries = _defaultMealOrder.map((m) => MealEntry(title: m, options: [""])).toList();
       }
     }
@@ -117,20 +146,15 @@ class _MenuPageState extends State<MenuPage> {
     setState(() => _isLoading = false);
   }
 
-  void _addNewMeal() {
-    setState(() {
-      _mealEntries.add(MealEntry(title: "Nova Refeição", options: [""]));
-      _isEditing = true;
-    });
+  List<String> _parseValueToList(dynamic value) {
+    if (value is List) return value.map((e) => e.toString()).toList();
+    if (value is String && value.contains('•')) {
+      return value.split('•').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    }
+    return [value.toString()];
   }
 
-  void _deleteMeal(int index) {
-    setState(() {
-      _mealEntries[index].dispose();
-      _mealEntries.removeAt(index);
-    });
-  }
-
+  // --- SALVAMENTO (SINCRONIZA ORDEM E HORÁRIOS) ---
   Future<void> _saveData() async {
     setState(() => _isLoading = true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -139,23 +163,26 @@ class _MenuPageState extends State<MenuPage> {
     Map<String, String> menuData = {};
     List<Map<String, dynamic>> updatedSchedules = [];
 
-    // 1. Recupera os horários atuais para não perdê-los ao renomear/reordenar
+    // Pegamos horários atuais para preservar horas/minutos originais
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     List<dynamic> existingSchedules = userDoc.data()?['meal_schedules'] ?? [];
 
+    // Iteramos na ordem ATUAL da tela (_mealEntries)
     for (int i = 0; i < _mealEntries.length; i++) {
       var entry = _mealEntries[i];
       String title = entry.titleController.text.trim();
 
       if (title.isNotEmpty) {
-        // Texto para o cardápio
         menuData[title] = entry.optionsControllers
             .map((c) => c.text.trim())
             .where((t) => t.isNotEmpty)
             .join(' • ');
 
-        // Busca se já existia um horário para este índice ou este nome
-        var oldMatch = existingSchedules.length > i ? existingSchedules[i] : null;
+        // Tenta encontrar o horário antigo para este item pelo nome
+        var oldMatch = existingSchedules.firstWhere(
+                (s) => s['name'] == title,
+            orElse: () => (existingSchedules.length > i) ? existingSchedules[i] : null
+        );
 
         updatedSchedules.add({
           'id': i + 1,
@@ -171,17 +198,14 @@ class _MenuPageState extends State<MenuPage> {
     }
 
     try {
-      // Salva o Cardápio
-      await _db.saveMenu(menuData);
-
-      // Sincroniza a lista de horários/alertas
+      // SALVAMENTO UNIFICADO NO FIRESTORE
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'menu': menuData,
         'meal_schedules': updatedSchedules,
       });
 
-      // Reagenda as notificações
-      final NotificationService notifications = NotificationService();
-      await notifications.scheduleCustomNotifications(updatedSchedules);
+      // Atualiza os alarmes do celular com os novos nomes/horários
+      await NotificationService().scheduleCustomNotifications(updatedSchedules);
 
       setState(() {
         _isEditing = false;
@@ -191,7 +215,7 @@ class _MenuPageState extends State<MenuPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Cardápio e Alertas sincronizados! 🔄'),
+            content: Text('Cardápio e Sugestões sincronizados! 🔄'),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
@@ -199,53 +223,15 @@ class _MenuPageState extends State<MenuPage> {
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      debugPrint("Erro ao salvar: $e");
+      debugPrint("Erro ao sincronizar cardápio: $e");
     }
   }
 
-  Future<void> _importFile() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf', 'jpg', 'png', 'jpeg'],
-      );
-
-      if (result != null) {
-        setState(() => _isLoading = true);
-        String extractedText = "";
-        String filePath = result.files.single.path!;
-        String extension = result.files.single.extension?.toLowerCase() ?? "";
-
-        if (extension == 'pdf') {
-          final bytes = File(filePath).readAsBytesSync();
-          final document = PdfDocument(inputBytes: bytes);
-          extractedText = PdfTextExtractor(document).extractText();
-          document.dispose();
-        } else {
-          final inputImage = InputImage.fromFilePath(filePath);
-          final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
-          extractedText = recognizedText.text;
-        }
-
-        _smartParseMenu(extractedText);
-        setState(() { _isLoading = false; _isEditing = true; });
-      }
-    } catch (e) { setState(() => _isLoading = false); }
-  }
-
-  void _smartParseMenu(String rawText) {
-    final text = rawText.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r'\s+'), ' ');
-    final titles = _mealEntries.map((e) => e.titleController.text).toList();
-
+  void _deleteMeal(int index) {
     setState(() {
-      for (var entry in _mealEntries) {
-        final pattern = RegExp('${RegExp.escape(entry.titleController.text)}' + r'[:\-]*\s*(.*?)(?=' + titles.join('|') + r'|OBS:|Dra\.|$)', caseSensitive: false);
-        final match = pattern.firstMatch(text);
-        if (match != null) {
-          String content = _formatExtractedText(match.group(1)!.trim());
-          entry.optionsControllers = [TextEditingController(text: content)];
-        }
-      }
+      _mealEntries[index].dispose();
+      _mealEntries.removeAt(index);
+      _isEditing = true; // Força salvar para atualizar a lista no banco
     });
   }
 
@@ -291,6 +277,7 @@ class _MenuPageState extends State<MenuPage> {
                         if (newIndex > oldIndex) newIndex -= 1;
                         final item = _mealEntries.removeAt(oldIndex);
                         _mealEntries.insert(newIndex, item);
+                        _isEditing = true;
                       });
                     },
                     itemBuilder: (context, index) {
@@ -305,7 +292,12 @@ class _MenuPageState extends State<MenuPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(backgroundColor: primaryGreen, onPressed: _addNewMeal, child: const Icon(Icons.add, color: Colors.white)),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: primaryGreen,
+        onPressed: _addNewMeal,
+        tooltip: 'Adicionar nova refeição',
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
     );
   }
 
@@ -373,5 +365,47 @@ class _MenuPageState extends State<MenuPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _importFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'png', 'jpeg'],
+      );
+      if (result != null) {
+        setState(() => _isLoading = true);
+        String extractedText = "";
+        String filePath = result.files.single.path!;
+        String extension = result.files.single.extension?.toLowerCase() ?? "";
+        if (extension == 'pdf') {
+          final bytes = File(filePath).readAsBytesSync();
+          final document = PdfDocument(inputBytes: bytes);
+          extractedText = PdfTextExtractor(document).extractText();
+          document.dispose();
+        } else {
+          final inputImage = InputImage.fromFilePath(filePath);
+          final RecognizedText recognizedText = await _textRecognizer.processImage(inputImage);
+          extractedText = recognizedText.text;
+        }
+        _smartParseMenu(extractedText);
+        setState(() { _isLoading = false; _isEditing = true; });
+      }
+    } catch (e) { setState(() => _isLoading = false); }
+  }
+
+  void _smartParseMenu(String rawText) {
+    final text = rawText.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r'\s+'), ' ');
+    final titles = _mealEntries.map((e) => e.titleController.text).toList();
+    setState(() {
+      for (var entry in _mealEntries) {
+        final pattern = RegExp('${RegExp.escape(entry.titleController.text)}' + r'[:\-]*\s*(.*?)(?=' + titles.join('|') + r'|OBS:|Dra\.|$)', caseSensitive: false);
+        final match = pattern.firstMatch(text);
+        if (match != null) {
+          String content = _formatExtractedText(match.group(1)!.trim());
+          entry.optionsControllers = [TextEditingController(text: content)];
+        }
+      }
+    });
   }
 }
