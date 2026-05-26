@@ -1,11 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import '../services/database_service.dart';
-import '../services/diet_service.dart';
 import '../services/notification_service.dart';
 import 'assessment_page.dart';
 import 'notification_history_page.dart';
@@ -15,6 +17,9 @@ import 'menu_page.dart';
 import 'diet_page.dart';
 import 'weight_monthly_page.dart';
 import 'calendar_page.dart';
+import 'dart:convert';
+import 'dart:typed_data';
+
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,6 +32,7 @@ class _HomePageState extends State<HomePage> {
   final DatabaseService _db = DatabaseService();
   final NotificationService _notifications = NotificationService();
   double? _lastScheduledTarget;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -67,11 +73,21 @@ class _HomePageState extends State<HomePage> {
         slivers: [
           SliverAppBar(
             expandedHeight: 180.0,
+            backgroundColor: Colors.white,
+            elevation: 0,
+            pinned: true, // Mantém a barra visível ao rolar, se desejar
             flexibleSpace: FlexibleSpaceBar(
               background: Center(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 50),
-                  child: Image.asset('assets/icon/app_icon.home.png', height: 120, errorBuilder: (_, __, ___) => const Text('REEDU')),
+                  // 2. Ajuste o padding do topo para centralizar o logo
+                  padding: const EdgeInsets.only(top: 30),
+                  child: Image.asset(
+                    'assets/icon/app_icon.home.png',
+                    // 3. Reduza a altura da imagem (100 é um bom tamanho)
+                    height: 250,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Text('REEDU'),
+                  ),
                 ),
               ),
             ),
@@ -97,58 +113,102 @@ class _HomePageState extends State<HomePage> {
                   final nextMeal = _getNextMealInfo(profileData?['meal_schedules'], profileData?['menu']);
                   final double waterTarget = (profileData?['waterTarget'] ?? 4.0).toDouble();
                   final List<String> waterIntervals = List<String>.from(profileData?['waterIntervals'] ?? ['07:00-12:00', '13:00-15:00', '15:00-18:30', '18:30-22:00']);
+                  final int totalAgendado = (profileData?['meal_schedules'] as List?)?.length ?? 6;
 
-                  return StreamBuilder<DocumentSnapshot>(
-                    stream: _db.todayStats,
-                    builder: (context, statsSnap) {
-                      final statsData = statsSnap.data?.data() as Map<String, dynamic>?;
-                      final mealChecks = Map<String, dynamic>.from(statsData?['meal_checks'] ?? {});
-                      final waterChecks = Map<String, dynamic>.from(statsData?['water_checks'] ?? {});
+                  return StreamBuilder<QuerySnapshot>(                    // Buscamos todos os registros do mês para montar o histórico do calendário
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(FirebaseAuth.instance.currentUser?.uid)
+                        .collection('daily_stats')
+                        .snapshots(),
+                    builder: (context, monthlySnap) {
+                      Map<int, bool> realMonthlyHistory = {};
 
-                      return StreamBuilder<QuerySnapshot>(
-                        stream: _db.weightHistory,
-                        builder: (context, weightSnap) {
-                          List<FlSpot> weightSpots = [];
-                          List<String> weightDates = [];
-                          if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
-                            var docs = weightSnap.data!.docs;
-                            int start = docs.length > 7 ? docs.length - 7 : 0;
-                            int idx = 0;
-                            for (int i = start; i < docs.length; i++) {
-                              var w = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
-                              weightSpots.add(FlSpot(idx.toDouble(), w));
-                              var ts = docs[i]['timestamp'] as Timestamp?;
-                              weightDates.add(ts != null ? DateFormat('dd/MM').format(ts.toDate()) : '');
-                              idx++;
+                      if (monthlySnap.hasData) {
+                        for (var doc in monthlySnap.data!.docs) {
+                          try {
+                            DateTime date = DateTime.parse(doc.id);
+                            if (date.month == DateTime.now().month) {
+                              var data = doc.data() as Map<String, dynamic>;
+                              var checks = data['meal_checks'] as Map? ?? {};
+                              // Define se o dia foi "No Plano" (true) ou não (false)
+                              realMonthlyHistory[date.day] = checks.length >= totalAgendado && totalAgendado > 0;
                             }
+                          } catch (e) {
+                            debugPrint("Erro ao processar data do histórico: $e");
                           }
+                        }
+                      }
 
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildDietHeader(context, primaryOceanGreen, profileData),
-                              const SizedBox(height: 25),
-                              _buildHeaderMenu(context),
-                              const SizedBox(height: 25),
-                              _buildGreeting(displayName, profileData?['photoUrl'], primaryOceanGreen),
-                              const SizedBox(height: 20),
-                              _buildSuggestionCard(nextMeal, mealChecks, primaryOceanGreen),
-                              const SizedBox(height: 25),
-                              const Text('Checklist do Dia', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 10),
-                              _buildChecklist(mealChecks, profileData?['meal_schedules']),
-                              const SizedBox(height: 25),
-                              _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
-                              const SizedBox(height: 25),
-                              _buildWaterPanel(waterTarget, waterIntervals, waterChecks, primaryOceanGreen),
-                              const SizedBox(height: 40),
-                            ],
+                      return StreamBuilder<DocumentSnapshot>(
+                        stream: _db.todayStats,
+                        builder: (context, statsSnap) {
+                          final statsData = statsSnap.data?.data() as Map<String, dynamic>?;
+                          final mealChecks = Map<String, dynamic>.from(statsData?['meal_checks'] ?? {});
+                          final waterChecks = Map<String, dynamic>.from(statsData?['water_checks'] ?? {});
+
+                          // Contabiliza o consumo real de água para o resumo
+                          double totalBeberado = 0;
+                          waterChecks.forEach((key, value) {
+                            if (value == true || (value is num && value > 0)) {
+                              totalBeberado += (waterTarget / 4);
+                            }
+                          });
+
+                          // Agenda/Atualiza o resumo diário com os dados mais recentes
+                          _notifications.scheduleDailySummary(
+                            waterTotal: totalBeberado,
+                            mealChecks: mealChecks,
+                            monthlyHistory: realMonthlyHistory,
                           );
-                        },
+
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: _db.weightHistory,
+                            builder: (context, weightSnap) {
+                              List<FlSpot> weightSpots = [];
+                              List<String> weightDates = [];
+                              if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
+                                var docs = weightSnap.data!.docs;
+                                int start = docs.length > 7 ? docs.length - 7 : 0;
+                                int idx = 0;
+                                for (int i = start; i < docs.length; i++) {
+                                  var w = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
+                                  weightSpots.add(FlSpot(idx.toDouble(), w));
+                                  var ts = docs[i]['timestamp'] as Timestamp?;
+                                  weightDates.add(ts != null ? DateFormat('dd/MM').format(ts.toDate()) : '');
+                                  idx++;
+                                }
+                              }
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildGreeting(displayName, profileData?['photoUrl'], primaryOceanGreen),
+                                  const SizedBox(height: 20),
+                                  _buildDietHeader(context, primaryOceanGreen, profileData),
+                                  const SizedBox(height: 25),
+                                  _buildHeaderMenu(context),
+                                  const SizedBox(height: 25),
+                                  _buildSuggestionCard(nextMeal, mealChecks, primaryOceanGreen),
+                                  const SizedBox(height: 25),
+                                  const Text('Checklist do Dia',
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 10),
+                                  _buildChecklist(mealChecks, profileData?['meal_schedules']),
+                                  const SizedBox(height: 25),
+                                  _buildWeightSection(primaryOceanGreen, weightSpots, weightDates),
+                                  const SizedBox(height: 25),
+                                  _buildWaterPanel(waterTarget, waterIntervals, waterChecks, primaryOceanGreen),
+                                  const SizedBox(height: 40),
+                                ],
+                              );
+                            }, // Fim do weightSnap builder
+                          );
+                        }, // Fim do statsSnap builder
                       );
-                    },
+                    }, // Fim do monthlySnap builder
                   );
-                },
+                }, // Fim do profileSnap builder
               ),
             ),
           ),
@@ -157,7 +217,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- MÉTODOS DE UI ---
 
   Widget _buildDietHeader(BuildContext ctx, Color color, Map<String, dynamic>? profileData) {
     return Container(
@@ -182,15 +241,115 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGreeting(String name, String? url, Color color) {
-    return Row(children: [
-      CircleAvatar(
-          radius: 25,
-          backgroundColor: color.withOpacity(0.1),
-          backgroundImage: (url != null && url.startsWith('http')) ? NetworkImage(url) : null,
-          child: url == null ? Text(name[0], style: TextStyle(fontWeight: FontWeight.bold, color: color)) : null),
-      const SizedBox(width: 12),
-      Text('Olá, $name! Foco hoje.', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))
-    ]);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _isLoading ? null : () => _pickAndSavePhoto(),
+            child: Stack(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: color.withOpacity(0.1),
+                  backgroundImage: (url != null && url.isNotEmpty)
+                      ? (url.startsWith('http')
+                      ? NetworkImage(url) as ImageProvider // Se for link antigo
+                      : MemoryImage(base64Decode(url)))    // Se for Base64 (novo)
+                      : null,
+                  child: (url == null || url.isEmpty)
+                      ? Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : "?",
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: color),
+                  )
+                      : (_isLoading
+                      ? const CircularProgressIndicator(strokeWidth: 2)
+                      : null),
+                ),
+                if (!_isLoading)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.add_circle, color: color, size: 18),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Olá, $name!',
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF1A1C1E)),
+                ),
+                Text(
+                  'Vamos focar no plano hoje? 🎯',
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAndSavePhoto() async {
+    final ImagePicker picker = ImagePicker();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) return;
+
+    // 1. Seleciona a imagem da galeria
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 50,
+      maxWidth: 400,
+    );
+
+    if (image != null) {
+      try {
+        setState(() => _isLoading = true);
+
+        File file = File(image.path);
+        Uint8List imageBytes = await file.readAsBytes();
+        String base64Image = base64Encode(imageBytes);
+
+        // 3. Salva a String no Firestore (campo photoUrl)
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .set({'photoUrl': base64Image}, SetOptions(merge: true));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Foto atualizada! ✅"), backgroundColor: Colors.green),
+          );
+        }
+      } catch (e) {
+        debugPrint("Erro ao converter foto: $e");
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Widget _buildHeaderMenu(BuildContext context) {
@@ -207,7 +366,7 @@ class _HomePageState extends State<HomePage> {
     const Color themeBlue = Color(0xFF1967D2);
     return Column(children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        const Expanded(child: Text('Tendência Semanal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+        const Expanded(child: Text('Peso Semanal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
         ElevatedButton.icon(
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WeightMonthlyPage())),
           icon: const Icon(Icons.insights_outlined, size: 14),

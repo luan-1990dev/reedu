@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../services/database_service.dart';
 
 class DietPage extends StatefulWidget {
   const DietPage({super.key});
@@ -11,7 +10,6 @@ class DietPage extends StatefulWidget {
 }
 
 class _DietPageState extends State<DietPage> {
-  final DatabaseService _db = DatabaseService();
   bool _isEditing = false;
   bool _isLoading = false;
 

@@ -18,24 +18,28 @@ class _SupplementationPageState extends State<SupplementationPage> {
   bool _isLoading = false;
   bool _isEditing = false;
 
-  final Map<String, TextEditingController> _controllers = {
-    'Vitamina D': TextEditingController(text: '2000UI'),
-    'Vitamina K2': TextEditingController(text: '90mcg'),
-    'Vitamina C': TextEditingController(text: '90mg'),
-    'Zinco quelado': TextEditingController(text: '6mg'),
-    'Magnésio Quelado': TextEditingController(text: '300mg'),
-    'Cianocobalamina': TextEditingController(text: '500mcg'),
-    'Nitrato de tiamina': TextEditingController(text: '100mg'),
-    'Cloridato de piridoxina': TextEditingController(text: '100mg'),
-    'Picolinato de cromo': TextEditingController(text: '300mcg'),
-    'Maca peruana': TextEditingController(text: '500mg'),
-    'Tribullus Terrestris': TextEditingController(text: '500mg'),
-  };
+  List<TextEditingController> _nameControllers = [];
+  List<TextEditingController> _valueControllers = [];
 
   @override
   void initState() {
     super.initState();
+    _initializeDefaultControllers();
     _loadData();
+  }
+
+  void _initializeDefaultControllers() {
+    final defaults = [
+      ['Vitamina D', '2000UI'], ['Vitamina K2', '90mcg'], ['Vitamina C', '90mg'],
+      ['Zinco quelado', '6mg'], ['Magnésio Quelado', '300mg'], ['Cianocobalamina', '500mcg'],
+      ['Nitrato de tiamina', '100mg'], ['Cloridato de piridoxina', '100mg'],
+      ['Picolinato de cromo', '300mcg'], ['Maca peruana', '500mg'], ['Tribullus Terrestris', '500mg'],
+    ];
+
+    for (var item in defaults) {
+      _nameControllers.add(TextEditingController(text: item[0]));
+      _valueControllers.add(TextEditingController(text: item[1]));
+    }
   }
 
   Future<void> _loadData() async {
@@ -44,21 +48,33 @@ class _SupplementationPageState extends State<SupplementationPage> {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (doc.exists && doc.data()!.containsKey('supplements')) {
         final Map<String, dynamic> saved = doc.data()!['supplements'];
-        setState(() {
-          saved.forEach((key, value) {
-            if (_controllers.containsKey(key)) {
-              _controllers[key]!.text = value.toString();
-            }
+        if (saved.isNotEmpty) {
+          setState(() {
+            _nameControllers.clear();
+            _valueControllers.clear();
+            saved.forEach((key, value) {
+              _nameControllers.add(TextEditingController(text: key));
+              _valueControllers.add(TextEditingController(text: value.toString()));
+            });
           });
-        });
+        }
       }
     }
   }
 
   @override
   void dispose() {
-    for (var c in _controllers.values) { c.dispose(); }
+    for (var c in _nameControllers) { c.dispose(); }
+    for (var c in _valueControllers) { c.dispose(); }
     super.dispose();
+  }
+
+  void _addNewRow() {
+    setState(() {
+      _nameControllers.add(TextEditingController());
+      _valueControllers.add(TextEditingController());
+      _isEditing = true;
+    });
   }
 
   Future<void> _importPDF() async {
@@ -74,36 +90,30 @@ class _SupplementationPageState extends State<SupplementationPage> {
         if (mounted) {
           setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Suplementos importados! Verifique e salve.', textAlign: TextAlign.center),
-              backgroundColor: Colors.teal.shade700,
+            const SnackBar(
+              content: Text('Suplementos importados! Verifique e salve.'),
+              backgroundColor: Colors.teal,
               behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           );
           _isEditing = true;
         }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao ler PDF: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _parseSupplements(String text) {
-    _controllers.forEach((key, controller) {
-      final regExp = RegExp('$key[\\.\\s]+([\\d\\w]+)');
-      final match = regExp.firstMatch(text);
-      if (match != null) {
-        setState(() => controller.text = match.group(1)!);
+    setState(() {
+      for (int i = 0; i < _nameControllers.length; i++) {
+        final key = _nameControllers[i].text;
+        if (key.isEmpty) continue;
+        final regExp = RegExp('$key[\\.\\s]+([\\d\\w]+)', caseSensitive: false);
+        final match = regExp.firstMatch(text);
+        if (match != null) {
+          _valueControllers[i].text = match.group(1)!;
+        }
       }
     });
   }
@@ -111,31 +121,22 @@ class _SupplementationPageState extends State<SupplementationPage> {
   Future<void> _saveData() async {
     setState(() => _isLoading = true);
     Map<String, String> data = {};
-    _controllers.forEach((key, controller) => data[key] = controller.text);
+
+    for (int i = 0; i < _nameControllers.length; i++) {
+      if (_nameControllers[i].text.isNotEmpty) {
+        data[_nameControllers[i].text] = _valueControllers[i].text;
+      }
+    }
     try {
       await _db.saveSupplements(data);
       if (mounted) {
         setState(() { _isEditing = false; _isLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Suplementação salva com sucesso!', textAlign: TextAlign.center),
-            backgroundColor: Colors.teal.shade700,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+            const SnackBar(content: Text('Suplementação salva com sucesso!'), backgroundColor: Colors.green)
         );
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao salvar: $e', textAlign: TextAlign.center),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -149,21 +150,16 @@ class _SupplementationPageState extends State<SupplementationPage> {
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
-            expandedHeight: 150.0, pinned: true, backgroundColor: primaryPurple, elevation: 0,
+            expandedHeight: 120.0, pinned: true, backgroundColor: primaryPurple, elevation: 0,
             leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
             actions: [
-              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF, tooltip: 'Importar PDF'),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.white), onPressed: _importPDF),
               if (!_isEditing) IconButton(icon: const Icon(Icons.edit, color: Colors.white), onPressed: () => setState(() => _isEditing = true))
-              else IconButton(icon: _isLoading ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
+              else IconButton(icon: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.check, color: Colors.white, size: 30), onPressed: _isLoading ? null : _saveData),
             ],
-            flexibleSpace: FlexibleSpaceBar(
+            flexibleSpace: const FlexibleSpaceBar(
               centerTitle: true,
-              title: const Text('Suplementação', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [primaryPurple, Color(0xFFAB47BC)]),
-                ),
-              ),
+              title: Text('Suplementação', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
             ),
           ),
           StreamBuilder<DocumentSnapshot>(
@@ -183,24 +179,34 @@ class _SupplementationPageState extends State<SupplementationPage> {
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25)),
                         child: CheckboxListTile(
                           title: const Text('Tomei meus suplementos hoje', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: const Text('Clique para registrar o consumo do dia', style: TextStyle(fontSize: 12)),
                           value: isTaken,
                           activeColor: primaryPurple,
                           onChanged: (val) => _db.toggleMealCompletion('suplementos', val ?? false),
                         ),
                       ),
                       Container(
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
                         child: Column(
                           children: [
                             const Padding(
                               padding: EdgeInsets.all(16.0),
                               child: Row(children: [Icon(Icons.medication, color: primaryPurple), SizedBox(width: 10), Text('FÓRMULA MANIPULADA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey))]),
                             ),
-                            ..._controllers.keys.map((key) => _buildSupplementRow(key, primaryPurple)).toList(),
+                            ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _nameControllers.length,
+                              itemBuilder: (context, index) => _buildSupplementRow(index, primaryPurple),
+                            ),
+                            if (_isEditing)
+                              TextButton.icon(
+                                onPressed: _addNewRow,
+                                icon: const Icon(Icons.add, color: primaryPurple),
+                                label: const Text('ADICIONAR ITEM', style: TextStyle(color: primaryPurple)),
+                              ),
                             const Padding(
                               padding: EdgeInsets.all(16.0),
-                              child: Text('Posologia: Tomar 1 dose ao dia após o café.', style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple, fontSize: 13)),
+                              child: Text('Posologia: Tomar 1 dose ao dia após o café.', style: TextStyle(fontWeight: FontWeight.bold, color: primaryPurple, fontSize: 11)),
                             ),
                           ],
                         ),
@@ -221,16 +227,41 @@ class _SupplementationPageState extends State<SupplementationPage> {
     );
   }
 
-  Widget _buildSupplementRow(String key, Color color) {
+  Widget _buildSupplementRow(int index, Color color) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(key, style: const TextStyle(color: Colors.black54, fontSize: 14)),
-          _isEditing 
-            ? SizedBox(width: 80, child: TextField(controller: _controllers[key], textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: color), decoration: const InputDecoration(isDense: true)))
-            : Text(_controllers[key]!.text, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 15)),
+          Expanded(
+            flex: 2,
+            child: _isEditing
+                ? TextField(
+              controller: _nameControllers[index],
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
+              decoration: const InputDecoration(isDense: true, hintText: 'Nome', border: UnderlineInputBorder()),
+            )
+                : Text(_nameControllers[index].text, style: const TextStyle(color: Colors.black54, fontSize: 14)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 1,
+            child: _isEditing
+                ? TextField(
+              controller: _valueControllers[index],
+              textAlign: TextAlign.right,
+              style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 15),
+              decoration: const InputDecoration(isDense: true, hintText: 'Dose', border: UnderlineInputBorder()),
+            )
+                : Text(_valueControllers[index].text, textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 15)),
+          ),
+          if (_isEditing)
+            IconButton(
+              icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 20),
+              onPressed: () => setState(() {
+                _nameControllers.removeAt(index);
+                _valueControllers.removeAt(index);
+              }),
+            )
         ],
       ),
     );
@@ -245,7 +276,7 @@ class _SupplementationPageState extends State<SupplementationPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('SUGESTÕES DE MARCAS', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+          const Text('SUGESTÕES DE MARCAS DE WHEY PROTEIN', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,

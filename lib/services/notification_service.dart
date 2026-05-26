@@ -10,8 +10,8 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/database_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../main.dart';
 
 class NotificationService {
   final FlutterLocalNotificationsPlugin notificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -37,23 +37,31 @@ class NotificationService {
         final String? actionId = response.actionId;
         final String? payload = response.payload;
 
-        if (payload == 'open_store' || actionId == 'open_store') {
-          _launchStore();
+        if (actionId == null || actionId.isEmpty) {
+          if (payload == 'open_store') {
+            _launchStore();
+          } else {
+            navigatorKey.currentState?.pushNamed('/notifications');
+          }
         }
 
-        if (actionId == 'water_ok' && payload != null && payload.contains('|')) {
-          try {
-            final parts = payload.split('|');
-            final String period = parts[0];
-            final double amount = double.tryParse(parts[1]) ?? 0.0;
+        if (payload != null && payload.contains('|')) {
+          final parts = payload.split('|');
+          final String period = parts[0];
+          final double amount = double.tryParse(parts[1]) ?? 0.0;
+          final String? historyId = parts.length > 2 ? parts[2] : null;
 
-            final DatabaseService db = DatabaseService();
+          final DatabaseService db = DatabaseService();
+
+          if (actionId == 'water_ok') {
             if (FirebaseAuth.instance.currentUser != null) {
               await db.addWaterConsumption(period, amount);
-              debugPrint("Reedu: Soma de $amount L confirmada.");
+              if (historyId != null) await _updateHistoryStatus(historyId, "Ok ✅");
+              debugPrint("Reedu: Água somada e status atualizado.");
             }
-          } catch (e, stack) {
-            FirebaseCrashlytics.instance.recordError(e, stack);
+          }
+          else if (actionId == 'water_fail') {
+            if (historyId != null) await _updateHistoryStatus(historyId, "Nok ❌");
           }
         }
 
@@ -70,6 +78,45 @@ class NotificationService {
     await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
       'reedu_updates', 'Atualizações', importance: Importance.high,
     ));
+    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+      'reedu_summary_channel', 'Resumo Diário', importance: Importance.max,
+    ));
+  }
+
+  Future<void> _updateHistoryStatus(String docId, String status) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      await FirebaseFirestore.instance
+          .collection('users').doc(uid)
+          .collection('notifications_history').doc(docId)
+          .update({'status': status});
+    } catch (e) {
+      debugPrint("Erro ao atualizar status: $e");
+    }
+  }
+
+  Future<void> _saveToHistory({
+    required String id, required String title, required String body,
+    required String type, required String horarioFiltro
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    await FirebaseFirestore.instance
+        .collection('users').doc(uid)
+        .collection('notifications_history').doc(id)
+        .set({
+      'title': title,
+      'body': body,
+      'timestamp': FieldValue.serverTimestamp(),
+      'horarioFiltro': horarioFiltro,
+      'dataSimples': hojeStr,
+      'type': type,
+      'status': 'Pendente',
+      'isRead': false,
+    }, SetOptions(merge: true));
   }
 
   Future<void> setupPushNotifications() async {
@@ -84,7 +131,7 @@ class NotificationService {
         );
       }
     });
-  } // <--- ESTA CHAVE ESTAVA FALTANDO
+  }
 
   Future<void> _launchStore() async {
     final String packageName = "com.luan1990dev.reedu";
@@ -118,21 +165,15 @@ class NotificationService {
     );
   }
 
-  Future<void> _saveToHistory({required String id, required String title, required String body, required String type, required String horarioFiltro}) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    await FirebaseFirestore.instance.collection('users').doc(uid).collection('notifications_history').doc(id).set({
-      'title': title, 'body': body, 'timestamp': FieldValue.serverTimestamp(), 'horarioFiltro': horarioFiltro, 'dataSimples': hojeStr, 'type': type, 'isRead': false,
-    }, SetOptions(merge: true));
-  }
-
   Future<void> requestAllPermissions(BuildContext context) async {
     await Permission.notification.request();
-    final androidPlugin = notificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = notificationsPlugin
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestExactAlarmsPermission();
-    await Permission.ignoreBatteryOptimizations.request();
+    if (await Permission.ignoreBatteryOptimizations.isDenied) {
+      await Permission.ignoreBatteryOptimizations.request();
+    }
   }
 
   Future<void> scheduleCustomNotifications(List<Map<String, dynamic>> schedules) async {
@@ -140,29 +181,52 @@ class NotificationService {
     String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
     for (var meal in schedules) {
       String h = "${meal['hour'].toString().padLeft(2, '0')}:${meal['minute'].toString().padLeft(2, '0')}";
+      String historyId = "meal_${meal['id']}_$hojeStr";
+      await _saveToHistory(id: historyId, title: 'Refeição Reedu 🍽️', body: 'Está na hora do seu ${meal['name']}', type: 'Refeição', horarioFiltro: h);
       await notificationsPlugin.zonedSchedule(
         id: meal['id'] as int, title: 'Refeição Reedu 🍽️', body: 'Está na hora do seu ${meal['name']}',
+        payload: "meal|0|$historyId",
         scheduledDate: _nextInstanceOfTime(meal['hour'] as int, meal['minute'] as int),
-        notificationDetails: NotificationDetails(android: AndroidNotificationDetails('reedu_precision', 'Alarmes', importance: Importance.max)),
+        notificationDetails: const NotificationDetails(android: AndroidNotificationDetails('reedu_precision', 'Alarmes', importance: Importance.max)),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         matchDateTimeComponents: DateTimeComponents.time,
       );
-      _saveToHistory(id: "meal_${meal['id']}_$hojeStr", title: 'Refeição Reedu 🍽️', body: 'Hora do ${meal['name']}', type: 'Refeição', horarioFiltro: h);
     }
   }
 
-  Future<void> scheduleDailySummary({required double waterTotal, required Map mealChecks, required Map<int, bool> monthlyHistory}) async {
+  Future<void> scheduleDailySummary({
+    required double waterTotal,  required Map mealChecks,
+    required Map<int, bool> monthlyHistory,
+  }) async {
+    String waterStatus = waterTotal <= 1.0 ? "Crítico ⚠️" : waterTotal <= 3.0 ? "Aceitável 🔵" : "Excelente ✅";
     String check(String key) => (mealChecks[key] == true || (mealChecks[key] is num && mealChecks[key] > 0)) ? "✅" : "❌";
-    String fullMessage = "Água: ${waterTotal.toStringAsFixed(1)}L\n☕ Café: ${check('cafe')}\n🥪 Lanche: ${check('lanche_m')}\n🍲 Almoço: ${check('almoco')}";
+
+    String mealSummary =
+        "☕ Café: ${check('Café da Manhã')}\n"
+        "🥪 Lanche M: ${check('Lanche da Manhã')}\n"
+        "🍲 Almoço: ${check('Almoço')}\n"
+        "🍌 Lanche T: ${check('Lanche da Tarde 2')}\n"
+        "🍽️ Jantar: ${check('Jantar')}";
+
+    String fullMessage = "Água: ${waterTotal.toStringAsFixed(1)}L ($waterStatus)\n\n$mealSummary";
 
     await notificationsPlugin.zonedSchedule(
-      id: 777, title: "Resumo do dia anterior 📊", body: "Água: ${waterTotal.toStringAsFixed(1)}L",
-      scheduledDate: _nextInstanceOfTime(8, 15).add(const Duration(days: 1)),
-      notificationDetails: NotificationDetails(android: AndroidNotificationDetails('reedu_summary_channel', 'Resumo', importance: Importance.max, styleInformation: BigTextStyleInformation(fullMessage))),
+      id: 777,
+      title: "Resumo do seu dia anterior 📊",
+      body: "Água: ${waterTotal.toStringAsFixed(1)}L (Puxe para ver)",
+      scheduledDate: _nextInstanceOfTime(08,15).add(const Duration(days: 1)),
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'reedu_summary_channel',
+          'Resumo Diário',
+          importance: Importance.max,
+          priority: Priority.high,
+          styleInformation: BigTextStyleInformation(fullMessage), // Texto expandido
+        ),
+      ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
-    _saveToHistory(id: "resumo_${DateFormat('yyyy-MM-dd').format(DateTime.now())}", title: "Resumo do seu dia anterior 📊", body: fullMessage, type: 'Resumo', horarioFiltro: "08:15");
   }
 
   Future<void> scheduleWaterReminders(double dailyTotal) async {
@@ -192,6 +256,8 @@ class NotificationService {
 
     for (var alarm in schedule) {
       String h = "${alarm['h'].toString().padLeft(2, '0')}:${alarm['m'].toString().padLeft(2, '0')}";
+      String historyId = "agua_${alarm['id']}_$hojeStr";
+      await _saveToHistory(id: historyId, title: 'Reedu - Água 💧', body: alarm['msg'], type: 'Água', horarioFiltro: h);
       await notificationsPlugin.zonedSchedule(
         id: alarm['id'] as int, title: 'Reedu - Água 💧', body: alarm['msg'],
         payload: "${alarm['period']}|$dose",
@@ -202,6 +268,24 @@ class NotificationService {
       );
       _saveToHistory(id: "agua_${alarm['id']}_$hojeStr", title: 'Reedu - Água 💧', body: alarm['msg'], type: 'Água', horarioFiltro: h);
     }
+  }
+
+  NotificationDetails _buildWaterDetails(String msg) {
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        'reedu_water_cycle', 'Hidratação',
+        importance: Importance.max,
+        priority: Priority.high,
+        actions: [
+          const AndroidNotificationAction('water_ok', 'OK ✅', showsUserInterface: true),
+          const AndroidNotificationAction('water_fail', 'NOK ❌', showsUserInterface: true),
+        ],
+        color: const Color(0xFF1967D2),
+        styleInformation: BigTextStyleInformation(msg),
+        fullScreenIntent: true,
+        category: AndroidNotificationCategory.reminder,
+      ),
+    );
   }
 
   tz.TZDateTime _nextInstanceOfTime(int h, int m) {

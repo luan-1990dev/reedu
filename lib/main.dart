@@ -7,11 +7,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'screens/notification_history_page.dart';
 
 import 'screens/login_page.dart';
 import 'screens/home_page.dart';
 import 'services/notification_service.dart';
 import 'services/database_service.dart';
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -100,11 +103,15 @@ class MyApp extends StatelessWidget {
       if (isFirebaseReady) _setupNotificationsSafe();
     });
 
+
     return GestureDetector(
       onTap: () => SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge),
       child: MaterialApp(
         title: 'Reedu',
         debugShowCheckedModeBanner: false,
+        navigatorKey: navigatorKey,
+          routes: {    '/notifications': (context) => const NotificationHistoryPage(),},
+
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1967D2)),
           useMaterial3: true,
