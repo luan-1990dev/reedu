@@ -27,12 +27,11 @@ class NotificationService {
       tz.setLocalLocation(tz.getLocation('America/Sao_Paulo'));
     }
 
-
     const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('launcher_icon');
     const InitializationSettings initializationSettings = InitializationSettings(android: androidSettings);
 
     await notificationsPlugin.initialize(
-      settings: initializationSettings,
+      settings:initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) async {
         final String? actionId = response.actionId;
         final String? payload = response.payload;
@@ -57,7 +56,6 @@ class NotificationService {
             if (FirebaseAuth.instance.currentUser != null) {
               await db.addWaterConsumption(period, amount);
               if (historyId != null) await _updateHistoryStatus(historyId, "Ok ✅");
-              debugPrint("Reedu: Água somada e status atualizado.");
             }
           }
           else if (actionId == 'water_fail') {
@@ -122,54 +120,27 @@ class NotificationService {
   Future<void> setupPushNotifications() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
-
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
-        _showLocalUpdateNotification(
-          title: message.notification!.title ?? "Nova Atualização",
-          body: message.notification!.body ?? "Confira as novidades!",
-        );
+        _showLocalUpdateNotification(title: message.notification!.title ?? "Atualização", body: message.notification!.body ?? "Confira as novidades!");
       }
     });
   }
 
   Future<void> _launchStore() async {
     final String packageName = "com.luan1990dev.reedu";
-    final Uri url = Platform.isAndroid
-        ? Uri.parse("market://details?id=$packageName")
-        : Uri.parse("https://apps.apple.com/app/idYOUR_ID");
-
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } else {
-      final Uri webUrl = Uri.parse("https://play.google.com/store/apps/details?id=$packageName");
-      await launchUrl(webUrl, mode: LaunchMode.externalApplication);
-    }
+    final Uri url = Platform.isAndroid ? Uri.parse("market://details?id=$packageName") : Uri.parse("https://apps.apple.com/app/idYOUR_ID");
+    if (await canLaunchUrl(url)) { await launchUrl(url, mode: LaunchMode.externalApplication); }
   }
 
   Future<void> _showLocalUpdateNotification({required String title, required String body}) async {
-    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'reedu_updates', 'Atualizações',
-      importance: Importance.max, priority: Priority.high, icon: 'launcher_icon',
-      actions: <AndroidNotificationAction>[
-        const AndroidNotificationAction('open_store', 'ATUALIZAR AGORA', showsUserInterface: true),
-      ],
-    );
-
-    await notificationsPlugin.show(
-      id: 999,
-      title: title,
-      body: body,
-      notificationDetails: NotificationDetails(android: androidDetails),
-      payload: 'open_store',
-    );
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails('reedu_updates', 'Atualizações', importance: Importance.max, priority: Priority.high, icon: 'launcher_icon', actions: [const AndroidNotificationAction('open_store', 'ATUALIZAR AGORA', showsUserInterface: true)]);
+    await notificationsPlugin.show(id: 999, title: title, body: body, notificationDetails: NotificationDetails(android: androidDetails), payload: 'open_store');
   }
 
   Future<void> requestAllPermissions(BuildContext context) async {
     await Permission.notification.request();
-    final androidPlugin = notificationsPlugin
-        .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = notificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.requestExactAlarmsPermission();
     if (await Permission.ignoreBatteryOptimizations.isDenied) {
       await Permission.ignoreBatteryOptimizations.request();
@@ -195,78 +166,104 @@ class NotificationService {
   }
 
   Future<void> scheduleDailySummary({
-    required double waterTotal,  required Map mealChecks,
+    required double waterTotal, required Map mealChecks,
     required Map<int, bool> monthlyHistory,
   }) async {
     String waterStatus = waterTotal <= 1.0 ? "Crítico ⚠️" : waterTotal <= 3.0 ? "Aceitável 🔵" : "Excelente ✅";
     String check(String key) => (mealChecks[key] == true || (mealChecks[key] is num && mealChecks[key] > 0)) ? "✅" : "❌";
-
-    String mealSummary =
-        "☕ Café: ${check('Café da Manhã')}\n"
-        "🥪 Lanche M: ${check('Lanche da Manhã')}\n"
-        "🍲 Almoço: ${check('Almoço')}\n"
-        "🍌 Lanche T: ${check('Lanche da Tarde 2')}\n"
-        "🍽️ Jantar: ${check('Jantar')}";
-
+    String mealSummary = "☕ Café: ${check('Café da Manhã')}\n🥪 Lanche M: ${check('Lanche da Manhã')}\n🍲 Almoço: ${check('Almoço')}\n🍌 Lanche T: ${check('Lanche da Tarde 2')}\n🍽️ Jantar: ${check('Jantar')}";
     String fullMessage = "Água: ${waterTotal.toStringAsFixed(1)}L ($waterStatus)\n\n$mealSummary";
+    String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    await _saveToHistory(
+      id: "summary_$hojeStr",
+      title: "Resumo do dia anterior 📊",
+      body: fullMessage,
+      type: "Resumo",
+      horarioFiltro: "08:15",
+    );
 
     await notificationsPlugin.zonedSchedule(
       id: 777,
       title: "Resumo do seu dia anterior 📊",
       body: "Água: ${waterTotal.toStringAsFixed(1)}L (Puxe para ver)",
-      scheduledDate: _nextInstanceOfTime(08,15).add(const Duration(days: 1)),
-      notificationDetails: NotificationDetails(
-        android: AndroidNotificationDetails(
-          'reedu_summary_channel',
-          'Resumo Diário',
-          importance: Importance.max,
-          priority: Priority.high,
-          styleInformation: BigTextStyleInformation(fullMessage), // Texto expandido
-        ),
-      ),
+      scheduledDate: _nextInstanceOfTime(08, 15),
+      notificationDetails: NotificationDetails(android: AndroidNotificationDetails('reedu_summary_channel', 'Resumo Diário', importance: Importance.max, priority: Priority.high, styleInformation: BigTextStyleInformation(fullMessage))),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
   }
 
-  Future<void> scheduleWaterReminders(double dailyTotal) async {
-    for (int i = 200; i < 300; i++) await notificationsPlugin.cancel(id: i);
+  Future<void> scheduleWaterReminders(double dailyTotal, List<String> intervals) async {
+    for (int i = 200; i < 350; i++) await notificationsPlugin.cancel(id: i);
+
     double targetPerCycle = dailyTotal / 4;
-      double dose = targetPerCycle / 4;
+    double dose = targetPerCycle / 4;
     String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    int notificationIdCounter = 200;
 
-    final List<Map<String, dynamic>> schedule = [
-      {'id': 201, 'h': 7, 'm': 0, 'type': 'start', 'period': '07:00 - 12:00', 'msg': 'Início do ciclo da manhã! A meta é: ${targetPerCycle.toStringAsFixed(1)}L'},
-      {'id': 202, 'h': 8, 'm': 0, 'type': 'ask', 'period': '07:00 - 12:00', 'msg': 'Hora de beber água!'},
-      {'id': 203, 'h': 9, 'm': 0, 'type': 'ask', 'period': '07:00 - 12:00', 'msg': 'Não esqueça de se hidratar!'},
-      {'id': 204, 'h': 10, 'm': 0, 'type': 'ask', 'period': '07:00 - 12:00', 'msg': 'Mais um pouco de água!'},
-      {'id': 205, 'h': 11, 'm': 0, 'type': 'ask', 'period': '07:00 - 12:00', 'msg': 'Última hidratação antes do almoço!'},
-      {'id': 206, 'h': 12, 'm': 0, 'type': 'end', 'period': '07:00 - 12:00', 'msg': 'Fim do ciclo da manhã.'},
-      {'id': 207, 'h': 13, 'm': 0, 'type': 'start', 'period': '13:00 - 15:00', 'msg': 'Início do primeiro ciclo da tarde! A meta é: ${targetPerCycle.toStringAsFixed(1)}L'},
-      {'id': 208, 'h': 14, 'm': 0, 'type': 'ask', 'period': '13:00 - 15:00', 'msg': 'Não esqueça de se hidratar!'},
-      {'id': 209, 'h': 15, 'm': 0, 'type': 'end', 'period': '13:00 - 15:00', 'msg': 'Fim do ciclo da tarde.'},
-      {'id': 210, 'h': 16, 'm': 30, 'type': 'ask', 'period': '15:00 - 18:30', 'msg': 'Início do segundo ciclo da tarde! A meta é: ${targetPerCycle.toStringAsFixed(1)}L'},
-      {'id': 211, 'h': 17, 'm': 30, 'type': 'ask', 'period': '15:00 - 18:30', 'msg': 'Mais um copo de água!'},
-      {'id': 212, 'h': 18, 'm': 30, 'type': 'end', 'period': '15:00 - 18:30', 'msg': 'Fim do ciclo da tarde.'},
-      {'id': 213, 'h': 19, 'm': 0, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Início do ciclo da noite! A meta é: ${targetPerCycle.toStringAsFixed(1)}L'},
-      {'id': 214, 'h': 22, 'm': 0, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Não esqueça da água!'},
-      {'id': 215, 'h': 21, 'm': 0, 'type': 'ask', 'period': '18:30 - 22:00', 'msg': 'Essa é a hidratação final!'},
-      {'id': 216, 'h': 22, 'm': 0, 'type': 'end', 'period': '18:30 - 22:00', 'msg': 'Fim do ciclo da noite. Bom descanso!'},
-    ];
+    for (int i = 0; i < intervals.length; i++) {
+      try {
+        String period = intervals[i];
+        List<String> times = period.split(' - ');
+        String startStr = times[0];
+        String endStr = times[1];
 
-    for (var alarm in schedule) {
-      String h = "${alarm['h'].toString().padLeft(2, '0')}:${alarm['m'].toString().padLeft(2, '0')}";
-      String historyId = "agua_${alarm['id']}_$hojeStr";
-      await _saveToHistory(id: historyId, title: 'Reedu - Água 💧', body: alarm['msg'], type: 'Água', horarioFiltro: h);
-      await notificationsPlugin.zonedSchedule(
-        id: alarm['id'] as int, title: 'Reedu - Água 💧', body: alarm['msg'],
-        payload: "${alarm['period']}|$dose",
-        scheduledDate: _nextInstanceOfTime(alarm['h'] as int, alarm['m'] as int),
-        notificationDetails: NotificationDetails(android: AndroidNotificationDetails('reedu_water_cycle', 'Hidratação', importance: Importance.max, priority: Priority.high, actions: [const AndroidNotificationAction('water_ok', 'OK ✅', showsUserInterface: true), const AndroidNotificationAction('water_fail', 'NOK ❌', showsUserInterface: true,)])),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        matchDateTimeComponents: DateTimeComponents.time,
-      );
-      _saveToHistory(id: "agua_${alarm['id']}_$hojeStr", title: 'Reedu - Água 💧', body: alarm['msg'], type: 'Água', horarioFiltro: h);
+        int startHour = int.parse(startStr.split(':')[0]);
+        int startMinute = int.parse(startStr.split(':')[1]);
+        int endHour = int.parse(endStr.split(':')[0]);
+        int endMinute = int.parse(endStr.split(':')[1]);
+
+        // 1. INÍCIO DO CICLO
+        String startHistoryId = "agua_${notificationIdCounter}_$hojeStr";
+        await _saveToHistory(id: startHistoryId, title: 'Ciclo ${i + 1} iniciado! 💧', body: 'Meta: ${targetPerCycle.toStringAsFixed(1)}L', type: 'Água', horarioFiltro: startStr);
+        await notificationsPlugin.zonedSchedule(
+          id: notificationIdCounter++,
+          title: 'Reedu - Início do Ciclo 💧',
+          body: 'Meta do período: ${targetPerCycle.toStringAsFixed(1)}L',
+          payload: "$period|$dose|$startHistoryId",
+          scheduledDate: _nextInstanceOfTime(startHour, startMinute),
+          notificationDetails: _buildWaterDetails('Hora de começar a se hidratar!'),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.time,
+        );
+
+        // 2. MEIO DO CICLO (HORAS CHEIAS)
+        int currentHour = startHour + 1;
+        while (currentHour < endHour) {
+          String timeStr = "${currentHour.toString().padLeft(2, '0')}:00";
+          String midHistoryId = "agua_${notificationIdCounter}_$hojeStr";
+          await _saveToHistory(id: midHistoryId, title: 'Lembrete de Água 💧', body: 'Hora de beber mais um pouco!', type: 'Água', horarioFiltro: timeStr);
+          await notificationsPlugin.zonedSchedule(
+            id: notificationIdCounter++,
+            title: 'Reedu - Hidratação 💧',
+            body: 'Mais um pouco (+${dose.toStringAsFixed(2)}L)',
+            payload: "$period|$dose|$midHistoryId",
+            scheduledDate: _nextInstanceOfTime(currentHour, 0),
+            notificationDetails: _buildWaterDetails('Não esqueça da sua meta diária!'),
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            matchDateTimeComponents: DateTimeComponents.time,
+          );
+          currentHour++;
+        }
+
+        // 3. FIM DO CICLO
+        String endHistoryId = "agua_${notificationIdCounter}_$hojeStr";
+        String endBody = (i == 3) ? 'Meta concluída. Bom descanso! 🌙' : 'Fim do ciclo ${i + 1}.';
+        await _saveToHistory(id: endHistoryId, title: 'Fim de Ciclo ✅', body: endBody, type: 'Água', horarioFiltro: endStr);
+        await notificationsPlugin.zonedSchedule(
+          id: notificationIdCounter++,
+          title: 'Reedu - Ciclo Finalizado ✅',
+          body: endBody,
+          payload: "$period|$dose|$endHistoryId",
+          scheduledDate: _nextInstanceOfTime(endHour, endMinute),
+          notificationDetails: _buildWaterDetails('Finalizando período de hidratação.'),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.time,
+        );
+      } catch (e) {
+        debugPrint("Erro ao agendar ciclo de água $i: $e");
+      }
     }
   }
 
@@ -274,15 +271,13 @@ class NotificationService {
     return NotificationDetails(
       android: AndroidNotificationDetails(
         'reedu_water_cycle', 'Hidratação',
-        importance: Importance.max,
-        priority: Priority.high,
+        importance: Importance.max, priority: Priority.high, fullScreenIntent: true,
         actions: [
           const AndroidNotificationAction('water_ok', 'OK ✅', showsUserInterface: true),
           const AndroidNotificationAction('water_fail', 'NOK ❌', showsUserInterface: true),
         ],
         color: const Color(0xFF1967D2),
         styleInformation: BigTextStyleInformation(msg),
-        fullScreenIntent: true,
         category: AndroidNotificationCategory.reminder,
       ),
     );

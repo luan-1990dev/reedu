@@ -76,7 +76,8 @@ Future<void> _setupNotificationsSafe() async {
         final data = doc.data()!;
         final double waterTarget = (data['waterTarget'] ?? 4.0).toDouble();
 
-        await notificationService.scheduleWaterReminders(waterTarget);
+        final List<String> waterIntervals = List<String>.from(data['waterIntervals'] ?? ['07:00-12:00', '13:00-15:00', '15:00-18:30', '18:30-22:00']);
+        await notificationService.scheduleWaterReminders(waterTarget, waterIntervals);
 
         if (data.containsKey('meal_schedules')) {
           final List<dynamic> schedules = data['meal_schedules'];
@@ -85,7 +86,7 @@ Future<void> _setupNotificationsSafe() async {
           );
         }
       } else {
-        await notificationService.scheduleWaterReminders(4.0);
+        await notificationService.scheduleWaterReminders(4.0, ['07:00-12:00', '13:00-15:00', '15:00-18:30', '18:30-22:00']);
       }
     }
   } catch (e) {

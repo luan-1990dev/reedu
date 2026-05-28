@@ -19,6 +19,7 @@ import 'weight_monthly_page.dart';
 import 'calendar_page.dart';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 
 class HomePage extends StatefulWidget {
@@ -31,13 +32,18 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final DatabaseService _db = DatabaseService();
   final NotificationService _notifications = NotificationService();
-  double? _lastScheduledTarget;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
     _initNotifications();
+  }
+
+  @override
+  void dispose() {
+    WakelockPlus.disable();
+    super.dispose();
   }
 
   Future<void> _initNotifications() async {
@@ -75,15 +81,13 @@ class _HomePageState extends State<HomePage> {
             expandedHeight: 180.0,
             backgroundColor: Colors.white,
             elevation: 0,
-            pinned: true, // Mantém a barra visível ao rolar, se desejar
+            pinned: true,
             flexibleSpace: FlexibleSpaceBar(
               background: Center(
                 child: Padding(
-                  // 2. Ajuste o padding do topo para centralizar o logo
                   padding: const EdgeInsets.only(top: 30),
                   child: Image.asset(
                     'assets/icon/app_icon.home.png',
-                    // 3. Reduza a altura da imagem (100 é um bom tamanho)
                     height: 250,
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Text('REEDU'),
@@ -108,6 +112,14 @@ class _HomePageState extends State<HomePage> {
               child: StreamBuilder<DocumentSnapshot>(
                 stream: _db.userProfileStream,
                 builder: (context, profileSnap) {
+                  if (profileSnap.connectionState == ConnectionState.waiting) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 50),
+                        child: CircularProgressIndicator(color: primaryOceanGreen),
+                      ),
+                    );
+                  }
                   final profileData = profileSnap.data?.data() as Map<String, dynamic>?;
                   final String displayName = _getDisplayName(profileData);
                   final nextMeal = _getNextMealInfo(profileData?['meal_schedules'], profileData?['menu']);
@@ -131,7 +143,6 @@ class _HomePageState extends State<HomePage> {
                             if (date.month == DateTime.now().month) {
                               var data = doc.data() as Map<String, dynamic>;
                               var checks = data['meal_checks'] as Map? ?? {};
-                              // Define se o dia foi "No Plano" (true) ou não (false)
                               realMonthlyHistory[date.day] = checks.length >= totalAgendado && totalAgendado > 0;
                             }
                           } catch (e) {
@@ -147,7 +158,6 @@ class _HomePageState extends State<HomePage> {
                           final mealChecks = Map<String, dynamic>.from(statsData?['meal_checks'] ?? {});
                           final waterChecks = Map<String, dynamic>.from(statsData?['water_checks'] ?? {});
 
-                          // Contabiliza o consumo real de água para o resumo
                           double totalBeberado = 0;
                           waterChecks.forEach((key, value) {
                             if (value == true || (value is num && value > 0)) {
@@ -155,7 +165,6 @@ class _HomePageState extends State<HomePage> {
                             }
                           });
 
-                          // Agenda/Atualiza o resumo diário com os dados mais recentes
                           _notifications.scheduleDailySummary(
                             waterTotal: totalBeberado,
                             mealChecks: mealChecks,
@@ -573,44 +582,216 @@ class _HomePageState extends State<HomePage> {
                 },
               ),
             ),
+            actionsPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 15),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-              ElevatedButton(onPressed: () async {
-                await FirebaseFirestore.instance.collection('users').doc(FirebaseAuth.instance.currentUser?.uid).set({'meal_schedules': tempSchedules}, SetOptions(merge: true));
-                await _notifications.scheduleCustomNotifications(tempSchedules);
-                if (mounted) Navigator.pop(context);
-              }, child: const Text('SALVAR')),
+              // Botão CANCELAR (Estilo Oval)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.redAccent,
+                  elevation: 0,
+                  shape: const StadiumBorder(),
+                  side: BorderSide(color: Colors.grey.shade200),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('CANCELAR'),
+              ),
+              // Botão SALVAR (Estilo Oval)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF8FAFC),
+                  foregroundColor: const Color(0xFF00695C),
+                  elevation: 0,
+                  shape: const StadiumBorder(),
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(horizontal: 25),
+                ),
+                onPressed: () async {
+                  try {
+                    // 1. Salva a nova lista no Firestore
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(FirebaseAuth.instance.currentUser?.uid)
+                        .set({'meal_schedules': tempSchedules}, SetOptions(merge: true));
+
+                    // 2. Atualiza os agendamentos de notificações
+                    await _notifications.scheduleCustomNotifications(tempSchedules);
+
+                    if (mounted) {
+                      Navigator.pop(context); // Fecha o diálogo
+
+                      // 3. Exibe a confirmação visual
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text("Horários das refeições atualizados! 🔄", textAlign: TextAlign.center),
+                          backgroundColor: const Color(0xFF00695C),
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    debugPrint("Erro ao salvar horários: $e");
+                  }
+                },
+                child: const Text('SALVAR', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
             ],
           );
         },
       ),
     );
   }
-
   void _showEditDailyWaterGoalDialog(double currentTarget, List<String> currentIntervals) {
-    final targetController = TextEditingController(text: currentTarget.toStringAsFixed(1).replaceAll('.', ','));
-    final List<TextEditingController> intervalControllers = currentIntervals.map((i) => TextEditingController(text: i)).toList();
+    final targetController = TextEditingController(
+      text: currentTarget.toStringAsFixed(1).replaceAll('.', ','),
+    );
+
+    final List<TextEditingController> startHourControllers = [];
+    final List<TextEditingController> startMinuteControllers = [];
+    final List<TextEditingController> endHourControllers = [];
+    final List<TextEditingController> endMinuteControllers = [];
+
+    for (var interval in currentIntervals) {
+      final parts = interval.split(RegExp(r'[:\- ]+')).where((p) => p.isNotEmpty).toList();
+      startHourControllers.add(TextEditingController(text: parts.length > 0 ? parts[0] : "00"));
+      startMinuteControllers.add(TextEditingController(text: parts.length > 1 ? parts[1] : "00"));
+      endHourControllers.add(TextEditingController(text: parts.length > 2 ? parts[2] : "00"));
+      endMinuteControllers.add(TextEditingController(text: parts.length > 3 ? parts[3] : "00"));
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Meta e Horários de Água'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+        title: const Text('Meta e Horários de Água', style: TextStyle(fontWeight: FontWeight.bold)),
         content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: targetController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Meta Diária (Litros)", suffixText: "L")),
-            const SizedBox(height: 20),
-            ...List.generate(4, (index) => Padding(padding: const EdgeInsets.only(top: 10), child: TextField(controller: intervalControllers[index], decoration: InputDecoration(labelText: "Período ${index + 1}", isDense: true)))),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: targetController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*[,]?\d*'))],
+                style: const TextStyle(color: Color(0xFF374151), fontWeight: FontWeight.bold),
+                decoration: const InputDecoration(labelText: "Meta Diária", suffixText: "Litros"),
+              ),
+              const SizedBox(height: 25),
+              ...List.generate(currentIntervals.length, (index) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 15),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildMiniField(startHourControllers[index], "HH"),
+                      const Text(":", style: TextStyle(fontWeight: FontWeight.bold)),
+                      _buildMiniField(startMinuteControllers[index], "MM"),
+
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 5),
+                        child: Text("-", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                      ),
+                      _buildMiniField(endHourControllers[index], "HH"),
+                      const Text(":", style: TextStyle(fontWeight: FontWeight.bold)),
+                      _buildMiniField(endMinuteControllers[index], "MM"),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 15),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCELAR')),
-          ElevatedButton(onPressed: () async {
-            final val = double.tryParse(targetController.text.replaceAll(',', '.')) ?? 4.0;
-            final newIntervals = intervalControllers.map((c) => c.text).toList();
-            await FirebaseFirestore.instance.collection('users').doc(FirebaseAuth.instance.currentUser?.uid).set({'waterTarget': val, 'waterIntervals': newIntervals}, SetOptions(merge: true));
-            await _notifications.scheduleWaterReminders(val);
-            if (mounted) Navigator.pop(context);
-          }, child: const Text('SALVAR')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.redAccent,
+              elevation: 0,
+              shape: const StadiumBorder(),
+              side: BorderSide(color: Colors.grey.shade200),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCELAR'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF8FAFC),
+              foregroundColor: Colors.green.shade700,
+              elevation: 0,
+              shape: const StadiumBorder(),
+              side: BorderSide(color: Colors.grey.shade300),
+              padding: const EdgeInsets.symmetric(horizontal: 25),
+            ),
+            onPressed: () async {
+              setState(() => _isLoading = true);
+
+              final val = double.tryParse(targetController.text.replaceAll(',', '.')) ?? 4.0;
+
+              final List<String> newIntervals = [];
+              for (int i = 0; i < currentIntervals.length; i++) {
+                String sh = startHourControllers[i].text.padLeft(2, '0');
+                String sm = startMinuteControllers[i].text.padLeft(2, '0');
+                String eh = endHourControllers[i].text.padLeft(2, '0');
+                String em = endMinuteControllers[i].text.padLeft(2, '0');
+                newIntervals.add("$sh:$sm - $eh:$em");
+              }
+
+              try {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(FirebaseAuth.instance.currentUser?.uid)
+                    .set({'waterTarget': val, 'waterIntervals': newIntervals}, SetOptions(merge: true));
+
+                await _notifications.scheduleWaterReminders(val, newIntervals);
+
+                if (mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text("Metas de água atualizadas! 💧", textAlign: TextAlign.center),
+                      backgroundColor: Colors.lightGreen,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              } catch (e) {
+                debugPrint("Erro ao salvar: $e");
+              } finally {
+                setState(() => _isLoading = false);
+              }
+            },
+            child: const Text('SALVAR', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMiniField(TextEditingController controller, String hint) {
+    return SizedBox(
+      width: 45,
+      child: TextField(
+        controller: controller,
+        textAlign: TextAlign.center,
+        keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(2),
+        ],
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade300)),
+        ),
       ),
     );
   }
@@ -655,6 +836,6 @@ class _HomePageState extends State<HomePage> {
         }
       }
     }
-    return {'title': 'Sem Refeição', 'time': '--:--', 'options': ['Configure seu plano'], 'key': 'none'};
+    return {'title': 'Refeições finalizadas. ', 'time': '--:--', 'options': [''], 'key': 'none'};
   }
 }

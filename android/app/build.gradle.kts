@@ -38,7 +38,7 @@ android {
     defaultConfig {
         applicationId = "com.luan1990dev.reedu"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        targetSdk = 36
 
         // DICA: Lembre-se de aumentar o versionCode para cada novo envio ao Google
         versionCode = 35
