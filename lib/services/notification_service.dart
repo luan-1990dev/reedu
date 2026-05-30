@@ -246,9 +246,16 @@ class NotificationService {
         int endHour = int.parse(endStr.split(':')[0]);
         int endMinute = int.parse(endStr.split(':')[1]);
 
-        // 1. INÍCIO DO CICLO
+        // --- 1. INÍCIO DO CICLO ---
         String startHistoryId = "agua_${notificationIdCounter}_$hojeStr";
-        await _saveToHistory(id: startHistoryId, title: 'Ciclo ${i + 1} iniciado! 💧', body: 'Meta: ${targetPerCycle.toStringAsFixed(1)}L', type: 'Água', horarioFiltro: startStr);
+        await _saveToHistory(
+            id: startHistoryId,
+            title: 'Ciclo ${i + 1} iniciado! 💧',
+            body: 'Meta: ${targetPerCycle.toStringAsFixed(1)}L',
+            type: 'Água',
+            horarioFiltro: startStr
+        );
+
         await notificationsPlugin.zonedSchedule(
           id: notificationIdCounter++,
           title: 'Reedu - Início do Ciclo 💧',
@@ -256,9 +263,10 @@ class NotificationService {
           payload: "$period|$dose|$startHistoryId",
           scheduledDate: _nextInstanceOfTime(startHour, startMinute),
           notificationDetails: _buildWaterDetails('Hora de começar a se hidratar!'),
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          androidScheduleMode: AndroidScheduleMode.alarmClock, // Modo Despertador
           matchDateTimeComponents: DateTimeComponents.time,
         );
+
 
         // 2. MEIO DO CICLO (HORAS CHEIAS)
         int currentHour = startHour + 1;
