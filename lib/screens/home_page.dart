@@ -38,6 +38,8 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _initNotifications();
+    WakelockPlus.enable();
+    _initNotifications();
   }
 
   @override
@@ -181,11 +183,20 @@ class _HomePageState extends State<HomePage> {
                                 int start = docs.length > 7 ? docs.length - 7 : 0;
                                 int idx = 0;
                                 for (int i = start; i < docs.length; i++) {
-                                  var w = double.tryParse(docs[i]['Peso'].toString().replaceAll(',', '.')) ?? 0;
-                                  weightSpots.add(FlSpot(idx.toDouble(), w));
-                                  var ts = docs[i]['timestamp'] as Timestamp?;
-                                  weightDates.add(ts != null ? DateFormat('dd/MM').format(ts.toDate()) : '');
-                                  idx++;
+                                  try {
+                                    var data = docs[i].data() as Map<String, dynamic>;
+                                    if (data.containsKey('Peso')) {
+                                      var w = double.tryParse(data['Peso'].toString().replaceAll(',', '.')) ?? 0;
+                                      if (w > 0) {
+                                        weightSpots.add(FlSpot(idx.toDouble(), w));
+                                        var ts = data['timestamp'] as Timestamp?;
+                                        weightDates.add(ts != null ? DateFormat('dd/MM').format(ts.toDate()) : '');
+                                        idx++;
+                                      }
+                                    }
+                                  } catch (e) {
+                                    debugPrint("Erro em um ponto do gráfico: $e");
+                                  }
                                 }
                               }
 
@@ -193,11 +204,11 @@ class _HomePageState extends State<HomePage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   _buildGreeting(displayName, profileData?['photoUrl'], primaryOceanGreen),
-                                  const SizedBox(height: 20),
+                                  const SizedBox(height: 10),
                                   _buildDietHeader(context, primaryOceanGreen, profileData),
-                                  const SizedBox(height: 25),
+                                  const SizedBox(height: 15),
                                   _buildHeaderMenu(context),
-                                  const SizedBox(height: 25),
+                                  const SizedBox(height: 15),
                                   _buildSuggestionCard(nextMeal, mealChecks, primaryOceanGreen),
                                   const SizedBox(height: 25),
                                   const Text('Checklist do Dia',
@@ -226,7 +237,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-
   Widget _buildDietHeader(BuildContext ctx, Color color, Map<String, dynamic>? profileData) {
     return Container(
       padding: const EdgeInsets.all(15),
@@ -249,6 +259,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  ImageProvider? _getAvatarImage(String? url) {
+    if (url == null || url.isEmpty) return null;
+
+    try {
+      if (url.startsWith('http')) {
+        return NetworkImage(url);
+      }
+
+      if (url.startsWith('/') && !url.contains(' ')) {
+        final file = File(url);
+        if (file.existsSync()) {
+          return FileImage(file);
+        }
+      }
+
+      String cleanBase64 = url.split(',').last.trim();
+      return MemoryImage(base64Decode(cleanBase64));
+
+    } catch (e) {
+      debugPrint("Erro ao carregar avatar: $e");
+      return null;
+    }
+  }
+
   Widget _buildGreeting(String name, String? url, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 15),
@@ -261,22 +295,18 @@ class _HomePageState extends State<HomePage> {
                 CircleAvatar(
                   radius: 28,
                   backgroundColor: color.withOpacity(0.1),
-                  backgroundImage: (url != null && url.isNotEmpty)
-                      ? (url.startsWith('http')
-                      ? NetworkImage(url) as ImageProvider // Se for link antigo
-                      : MemoryImage(base64Decode(url)))    // Se for Base64 (novo)
-                      : null,
+                  // USANDO A FUNÇÃO SEGURA AQUI:
+                  backgroundImage: _getAvatarImage(url),
                   child: (url == null || url.isEmpty)
                       ? Text(
                     name.isNotEmpty ? name[0].toUpperCase() : "?",
                     style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: color),
+                        color: color
+                    ),
                   )
-                      : (_isLoading
-                      ? const CircularProgressIndicator(strokeWidth: 2)
-                      : null),
+                      : null,
                 ),
                 if (!_isLoading)
                   Positioned(
@@ -284,10 +314,7 @@ class _HomePageState extends State<HomePage> {
                     right: 0,
                     child: Container(
                       padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
                       child: Icon(Icons.add_circle, color: color, size: 18),
                     ),
                   ),

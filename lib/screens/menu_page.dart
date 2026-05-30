@@ -46,16 +46,77 @@ class _MenuPageState extends State<MenuPage> {
   List<MealEntry> _mealEntries = [];
   MealEntry? _obsEntry;
 
-  final List<String> _defaultMealOrder = [
-    'Café da Manhã', 'Lanche da Manhã', 'Almoço',
-    'Lanche da Tarde 2', 'Jantar'
+  final List<String> sugestoesNomes = [
+    'Café da Manhã', 'Almoço', 'Jantar', 'Lanche Manhã',
+    'Lanche Tarde', 'Lanche Noite', 'Pré Treino', 'Pós Treino',
+    'Suplemento', 'Ceia'
   ];
 
   void _addNewMeal() {
-    setState(() {
-      _mealEntries.add(MealEntry(title: "Nova Refeição", options: [""]));
-      _isEditing = true;
-    });
+    final TextEditingController nomeController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+        title: const Text("Adicionar Refeição",
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nomeController,
+                autofocus: true, // Abre o teclado automaticamente
+                decoration: const InputDecoration(
+                  hintText: "Nome da refeição",
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 15),
+              const Text("Sugestões",
+                  style: TextStyle(fontSize: 12, color: Colors.blueGrey, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                alignment: WrapAlignment.center,
+                children: sugestoesNomes.map((nome) {
+                  return ActionChip(
+                    label: Text(nome, style: const TextStyle(fontSize: 11)),
+                    onPressed: () {
+                      nomeController.text = nome;
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCELAR"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            ),
+            onPressed: () {
+              if (nomeController.text.isNotEmpty) {
+                setState(() {
+                  _mealEntries.add(MealEntry(title: nomeController.text, options: [""]));
+                  _isEditing = true;
+                });
+                Navigator.pop(context);
+              }
+            },
+            child: const Text("ADICIONAR"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -127,8 +188,8 @@ class _MenuPageState extends State<MenuPage> {
             }
           });
           loadedEntries.sort((a, b) {
-            int indexA = _defaultMealOrder.indexOf(a.titleController.text);
-            int indexB = _defaultMealOrder.indexOf(b.titleController.text);
+            int indexA = sugestoesNomes.indexOf(a.titleController.text);
+            int indexB = sugestoesNomes.indexOf(b.titleController.text);
             return (indexA == -1 ? 99 : indexA).compareTo(indexB == -1 ? 99 : indexB);
           });
         }
@@ -138,9 +199,7 @@ class _MenuPageState extends State<MenuPage> {
           _obsEntry = MealEntry(title: 'Observações', options: _parseValueToList(savedMenu['Observações']));
         }
       } else {
-        // Inicialização padrão
-        _mealEntries = _defaultMealOrder.map((m) => MealEntry(title: m, options: [""])).toList();
-      }
+        _mealEntries = sugestoesNomes.map((m) => MealEntry(title: m, options: [""])).toList();      }
     }
     _obsEntry ??= MealEntry(title: 'Observações', options: [""]);
     setState(() => _isLoading = false);

@@ -166,15 +166,47 @@ class NotificationService {
   }
 
   Future<void> scheduleDailySummary({
-    required double waterTotal, required Map mealChecks,
+    required double waterTotal,
+    required Map mealChecks,
     required Map<int, bool> monthlyHistory,
   }) async {
     String waterStatus = waterTotal <= 1.0 ? "Crítico ⚠️" : waterTotal <= 3.0 ? "Aceitável 🔵" : "Excelente ✅";
-    String check(String key) => (mealChecks[key] == true || (mealChecks[key] is num && mealChecks[key] > 0)) ? "✅" : "❌";
-    String mealSummary = "☕ Café: ${check('Café da Manhã')}\n🥪 Lanche M: ${check('Lanche da Manhã')}\n🍲 Almoço: ${check('Almoço')}\n🍌 Lanche T: ${check('Lanche da Tarde 2')}\n🍽️ Jantar: ${check('Jantar')}";
+    String checkMeal(String keyword) {
+      bool done = mealChecks.entries.any((e) =>
+      e.key.toString().toLowerCase().contains(keyword.toLowerCase()) &&
+          (e.value == true || e.value == "OK" || (e.value is String && e.value.isNotEmpty))
+      );
+      return done ? "✅" : "❌";
+    }
+    Map<String, String> iconMap = {
+      'café': '',
+      'almoço': '',
+      'jantar': '',
+      'lanche manha': '',
+      'lanche tarde': '',
+      'lanche noite': '',
+      'pre treino': '',
+      'pós treino': '',
+      'suplemento': '',
+      'ceia': '',
+    };
+    String mealSummary = mealChecks.keys.map((mealName) {
+      String icon = '🍴';
+      iconMap.forEach((key, value) {
+        if (mealName.toLowerCase().contains(key)) icon = value;
+      });
+
+      bool done = mealChecks[mealName] == true ||
+          mealChecks[mealName] == "OK" ||
+          (mealChecks[mealName] is String && mealChecks[mealName].isNotEmpty);
+
+      return "$icon $mealName: ${done ? "✅" : "❌"}";
+    }).join('\n');
+
+    if (mealSummary.isEmpty) mealSummary = "Nenhuma refeição registrada.";
+
     String fullMessage = "Água: ${waterTotal.toStringAsFixed(1)}L ($waterStatus)\n\n$mealSummary";
     String hojeStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
     await _saveToHistory(
       id: "summary_$hojeStr",
       title: "Resumo do dia anterior 📊",
