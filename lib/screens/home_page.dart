@@ -20,8 +20,6 @@ import 'calendar_page.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
-
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -179,28 +177,39 @@ class _HomePageState extends State<HomePage> {
                             builder: (context, weightSnap) {
                               List<FlSpot> weightSpots = [];
                               List<String> weightDates = [];
+
                               if (weightSnap.hasData && weightSnap.data!.docs.isNotEmpty) {
+                                Map<String, double> uniqueDays = {};
                                 var docs = weightSnap.data!.docs;
-                                int start = docs.length > 7 ? docs.length - 7 : 0;
-                                int idx = 0;
-                                for (int i = start; i < docs.length; i++) {
+
+                                for (var doc in docs) {
                                   try {
-                                    var data = docs[i].data() as Map<String, dynamic>;
-                                    if (data.containsKey('Peso')) {
-                                      var w = double.tryParse(data['Peso'].toString().replaceAll(',', '.')) ?? 0;
+                                    var data = doc.data() as Map<String, dynamic>;
+                                    var ts = data['timestamp'] as Timestamp?;
+
+                                    if (data.containsKey('Peso') && ts != null) {
+                                      String dateLabel = DateFormat('dd/MM').format(ts.toDate());
+                                      double w = double.tryParse(data['Peso'].toString().replaceAll(',', '.')) ?? 0;
+
                                       if (w > 0) {
-                                        weightSpots.add(FlSpot(idx.toDouble(), w));
-                                        var ts = data['timestamp'] as Timestamp?;
-                                        weightDates.add(ts != null ? DateFormat('dd/MM').format(ts.toDate()) : '');
-                                        idx++;
+                                        uniqueDays[dateLabel] = w;
                                       }
                                     }
                                   } catch (e) {
-                                    debugPrint("Erro em um ponto do gráfico: $e");
+                                    debugPrint("Erro ao processar registro de peso: $e");
                                   }
                                 }
-                              }
+                                List<String> allLabels = uniqueDays.keys.toList();
+                                int start = allLabels.length > 7 ? allLabels.length - 7 : 0;
+                                int idx = 0;
 
+                                for (int i = start; i < allLabels.length; i++) {
+                                  String date = allLabels[i];
+                                  weightDates.add(date);
+                                  weightSpots.add(FlSpot(idx.toDouble(), uniqueDays[date]!));
+                                  idx++;
+                                }
+                              }
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -555,28 +564,6 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildHeaderIcon({required IconData icon, required Color color, required String label, required VoidCallback onPressed}) {
     return InkWell(onTap: onPressed, child: Column(children: [Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 22)), const SizedBox(height: 4), Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey))]));
-  }
-
-  void _confirmDeleteMeal(String mealName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Excluir Refeição?"),
-        content: Text("Remover '$mealName' permanentemente do cardápio?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              final uid = FirebaseAuth.instance.currentUser?.uid;
-              await FirebaseFirestore.instance.collection('users').doc(uid).update({'menu.$mealName': FieldValue.delete()});
-              if (mounted) Navigator.pop(context);
-            },
-            child: const Text("EXCLUIR", style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showEditMealScheduleDialog(Map<String, dynamic>? profileData) {
